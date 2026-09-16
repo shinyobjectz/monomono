@@ -9,7 +9,7 @@ It is delivered as a versioned package. Consumers pin a release at `.mono`, impo
 ## Attach it
 
 ```
-curl -fsSL https://raw.githubusercontent.com/content-jet/monomono/main/bin/monomono | bash -s -- init
+curl -fsSL https://raw.githubusercontent.com/shinyobjectz/monomono/main/bin/monomono | bash -s -- init
 just setup
 just check
 ```

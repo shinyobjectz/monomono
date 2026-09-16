@@ -3,7 +3,7 @@
 [monomono]
 version = "0.1.1"
 mode = "self"
-repo = "https://github.com/content-jet/monomono"
+repo = "https://github.com/shinyobjectz/monomono"
 
 [repo]
 name = "monomono"

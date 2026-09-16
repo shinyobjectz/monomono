@@ -41,7 +41,7 @@ MONO_SUBMODULES="$MONO_ROOT/submodules"
 MONO_AGENTS="$MONO_ROOT/.agents"
 MONO_TOOLCHAINS="$MONO_ROOT/toolchains"
 MONO_CI="$MONO_ROOT/git/ci"
-MONO_REPO_URL="${MONO_REPO_URL:-https://github.com/content-jet/monomono}"
+MONO_REPO_URL="${MONO_REPO_URL:-https://github.com/shinyobjectz/monomono}"
 
 die() {
   echo "$*" >&2

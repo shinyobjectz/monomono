@@ -1,6 +1,6 @@
 # __NAME__
 
-Monorepo on [monomono](https://github.com/content-jet/monomono). Nested `AGENTS.md` files own folder rules. This file is the repo contract: how work enters the tree, and which folder owns which kind of work. It is yours; the package never rewrites it.
+Monorepo on [monomono](https://github.com/shinyobjectz/monomono). Nested `AGENTS.md` files own folder rules. This file is the repo contract: how work enters the tree, and which folder owns which kind of work. It is yours; the package never rewrites it.
 
 ## Rules
 

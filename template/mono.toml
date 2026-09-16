@@ -3,7 +3,7 @@
 [monomono]
 version = "0.0.0"
 mode = "submodule"
-repo = "https://github.com/content-jet/monomono"
+repo = "https://github.com/shinyobjectz/monomono"
 
 [repo]
 name = "__NAME__"

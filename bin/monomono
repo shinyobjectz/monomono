@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Bootstrap. Attaches monomono to a repo as .mono and scaffolds the skeleton.
 #
-#   curl -fsSL https://raw.githubusercontent.com/content-jet/monomono/main/bin/monomono | bash -s -- init
+#   curl -fsSL https://raw.githubusercontent.com/shinyobjectz/monomono/main/bin/monomono | bash -s -- init
 #   monomono init [dir] [--ref v0.1.0] [--repo <url>] [--vendor] [--name <repo-name>]
 #   monomono version
 #
@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-REPO="${MONO_REPO_URL:-https://github.com/content-jet/monomono}"
+REPO="${MONO_REPO_URL:-https://github.com/shinyobjectz/monomono}"
 REF=""
 MODE="submodule"
 NAME=""
