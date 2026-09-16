@@ -110,8 +110,8 @@ cp -RL "$SRCS" "$BUCK_SCRATCH_PATH/lua"
 cd "$BUCK_SCRATCH_PATH/lua"
 # POSIX + dlopen on every platform. LUA_USE_MACOSX would add readline on 5.3, which is not hermetic.
 sys="-DLUA_USE_POSIX -DLUA_USE_DLOPEN"
-case `uname -s` in Darwin) libs="" ;; *) libs="-ldl" ;; esac
-make -s -C src all CC="${CC:-cc}" MYCFLAGS="-fPIC $sys" MYLIBS="$libs" >/dev/null
+case `uname -s` in Darwin) libs=""; ldflags="" ;; *) libs="-ldl"; ldflags="-Wl,-E" ;; esac   # -Wl,-E exports the API so C modules on LUA_CPATH resolve it
+make -s -C src all CC="${CC:-cc}" MYCFLAGS="-fPIC $sys" MYLIBS="$libs" MYLDFLAGS="$ldflags" >/dev/null
 mkdir -p "$out/bin" "$out/lib" "$out/include"
 cp src/lua src/luac "$out/bin/"
 cp src/liblua.a "$out/lib/"
