@@ -48,6 +48,48 @@ just toolchain add cxx
 just toolchain list
 just targets toolchains//: >/dev/null
 
+step "lua: hermetic toolchain, library, test, bundle, embed, C host"
+just toolchain add lua
+mkdir -p library/greet/util app/hello
+cat > library/greet/BUCK <<'BUCK'
+load("@monomono//rules/lua:defs.bzl", "lua_library", "lua_test")
+lua_library(name = "greet", srcs = ["greet.lua", "util/init.lua"], visibility = ["PUBLIC"])
+lua_test(name = "test", src = "test_greet.lua", deps = [":greet"])
+BUCK
+printf 'local M = {}\nfunction M.hello(n) return "hello, " .. n end\nreturn M\n' > library/greet/greet.lua
+printf 'return { shout = function(s) return s:upper() .. "!" end }\n' > library/greet/util/init.lua
+printf 'local g = require("greet")\nlocal u = require("util")\nassert(u.shout(g.hello("x")) == "HELLO, X!")\n' > library/greet/test_greet.lua
+cat > app/hello/BUCK <<'BUCK'
+load("@monomono//rules/lua:defs.bzl", "lua_binary", "lua_bundle", "lua_embed")
+load("@monomono//rules/lua:toolchain.bzl", "lua_cxx_library")
+lua_binary(name = "hello", main = "main.lua", deps = ["//library/greet:greet"])
+lua_bundle(name = "bundle", main = "main.lua", deps = ["//library/greet:greet"], bytecode = True)
+lua_embed(name = "embedded", src = ":bundle", symbol = "hello_lua")
+lua_cxx_library(name = "liblua")
+cxx_binary(name = "host", srcs = ["host.c"], headers = [":embedded"], header_namespace = "", deps = [":liblua"])
+BUCK
+printf 'local g = require("greet")\nprint(require("util").shout(g.hello(arg and arg[1] or "world")))\n' > app/hello/main.lua
+cat > app/hello/host.c <<'C'
+#include <stdio.h>
+#include "lua.h"
+#include "lualib.h"
+#include "lauxlib.h"
+#include "embedded.h"
+int main(void) {
+  lua_State *L = luaL_newstate(); luaL_openlibs(L);
+  if (luaL_loadbuffer(L, (const char *)hello_lua, hello_lua_len, "embedded") || lua_pcall(L, 0, 0, 0)) { fprintf(stderr, "%s\n", lua_tostring(L, -1)); return 1; }
+  lua_close(L); return 0; }
+C
+just test //library/greet:test
+[[ "$(just run //app/hello:hello -- buck 2>/dev/null | tail -n 1)" == "HELLO, BUCK!" ]]
+[[ "$(just run //app/hello:host 2>/dev/null | tail -n 1)" == "HELLO, WORLD!" ]]
+echo "lua binary and embedded C host both print through the bundle"
+just context feature test demo-app hello lua-red --lua
+if just test //context/projects/demo-app/features/hello:hello-lua-red >/dev/null 2>&1; then echo "expected lua red test to fail" >&2; exit 1; fi
+printf 'assert(1 + 1 == 2)\n' > context/projects/demo-app/features/hello/test/lua-red.lua
+just test //context/projects/demo-app/features/hello:hello
+echo "lua feature test red then green"
+
 step "area add"
 just area add server "Internal API."
 test -f server/AGENTS.md

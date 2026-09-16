@@ -1,0 +1,3 @@
+# Lua rules for the monomono cell. Helper scripts the rules run under the toolchain interpreter.
+export_file(name = "bundle.lua", visibility = ["PUBLIC"])
+export_file(name = "embed.lua", visibility = ["PUBLIC"])

@@ -74,6 +74,21 @@ The consumer is the buck2 project root. `.buckconfig` declares the bundled prelu
 
 `@monomono//rules:defs.bzl` exposes small macros: `mono_check` (a shell test from the repo root), `mono_script` (a runnable), `mono_feature_tests` (one target per test file plus a suite).
 
+## Lua
+
+The prelude has no Lua rules, so monomono ships them. `just toolchain add lua` declares a hermetic Lua 5.4.7 built once from pinned source into buck-out (`lua-system` uses whatever is on PATH), and `@monomono//rules/lua:defs.bzl` gives every `.lua` file a place in the graph.
+
+```
+lua_library(name, srcs, deps, root)     modules on LUA_PATH; every build runs luac -p on each file
+lua_binary(name, main, deps)            just run //app/x -- args
+lua_test(name, src, deps)               just test //library/x:test
+lua_bundle(name, main, deps, bytecode)  one file: package.preload per module, then main
+lua_embed(name, src, lang, symbol)      the bundle as a C header or Rust source
+lua_cxx_library(name)                   the hermetic interpreter as a C library, for a host that embeds it
+```
+
+Feature tests written as `test/*.lua` run the same way (`just context feature test p s name --lua`). A `luarocks` adapter keeps third-party rocks under `packages/lua`; expose the tree as a `lua_library` root. Business logic in Lua, hosts in anything: a Rust host takes the `.rs` embed and `mlua`, a C host links `lua_cxx_library`, the BEAM loads the bundle through luerl. Each host stays in its own area; the graph is shared.
+
 ## Versioning
 
 Releases are semver tags. `mono.toml` records the version a consumer is on. `just mono update [ref]` moves `packages/monomono` to the tag, runs every `migrations/<version>.sh` between the old and new version in order, adds template files that did not exist before, resyncs generated files, and stages the result. Consumer-owned files (`AGENTS.md`, `justfile`, `BUCK`, folder rules) are never overwritten; a change that must reach them ships as a migration.

@@ -12,7 +12,7 @@ usage:
   just context feature list [project]
   just context feature status <project> <slug>
   just context feature check [project [slug]]
-  just context feature test <project> <slug> <name>
+  just context feature test <project> <slug> <name> [--lua]
 USAGE
   exit 2
 }
@@ -92,7 +92,7 @@ load("@monomono//rules:defs.bzl", "mono_feature_tests")
 
 mono_feature_tests(
     name = "${slug}",
-    tests = glob(["test/*.sh"]),
+    tests = glob(["test/*.sh", "test/*.lua"]),
 )
 BUCK
   echo "created $(rel "$dest")  stage=spec"
@@ -150,15 +150,26 @@ cmd_check() {
 }
 
 cmd_test() {
-  local project=${1-} slug=${2-} name=${3-}
+  local project=${1-} slug=${2-} name=${3-} lang=sh
+  [[ ${4-} == --lua ]] && lang=lua
   [[ -n $project && -n $slug && -n $name ]] || usage
   local dir; dir=$(feature_dir "$project" "$slug")
   is_feature "$dir" || die "unknown feature: $project/$slug"
   [[ $(count "$(gherkin_files "$dir")") -gt 0 ]] || die "write Gherkin before tests: $project/$slug"
   local base dest
   base=$(kebab "$name")
-  dest="$dir/test/$base.sh"
+  dest="$dir/test/$base.$lang"
   [[ ! -e $dest ]] || die "test already exists: $(rel "$dest")"
+  if [[ $lang == lua ]]; then
+    cat >"$dest" <<LUA
+-- Red on purpose. Locks: $(rel "$dir")/bdd
+-- Runs under toolchains//:lua (just toolchain add lua). Put shared modules on LUA_PATH via deps in ../BUCK.
+error("red: ${project}/${slug} / ${name}")
+LUA
+    echo "created $(rel "$dest")  stage=implement"
+    echo "run: just test //$(rel "$dir"):${slug}"
+    return 0
+  fi
   cat >"$dest" <<SH
 #!/usr/bin/env bash
 # Red on purpose. Locks: $(rel "$dir")/bdd
