@@ -8,14 +8,14 @@ import '.mono/mono.just'
 # scripts/build/<target>.sh (for steps buck2 cannot own yet)
 [positional-arguments]
 build-script target *args:
-    ./scripts/build/"$1".sh "${@:2}"
+    @./scripts/build/"$1".sh "${@:2}"
 
 # scripts/tools/<name>.sh
 [positional-arguments]
 tool name *args:
-    ./scripts/tools/"$1".sh "${@:2}"
+    @./scripts/tools/"$1".sh "${@:2}"
 
 # scripts/update/<target>.sh
 [positional-arguments]
 update target *args:
-    ./scripts/update/"$1".sh "${@:2}"
+    @./scripts/update/"$1".sh "${@:2}"
