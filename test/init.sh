@@ -83,7 +83,6 @@ lua_tests(name = "tests", srcs = glob(["test_*.lua"]), deps = [":greet"])
 lua_repl(name = "repl", deps = [":greet"])
 lua_meta(name = "meta", deps = [":greet"])
 lua_meta(name = "meta-provided", deps = [":greet"], provided = ["meta/greet.lua"])
-lua_typecheck(name = "types", meta = ":meta-provided", path = "library/greet", srcs = glob(["**/*.lua"]))
 lua_bundle(name = "portable", main = "greet.lua", deps = [":greet"], dialect = "portable")
 BUCK
 cat > library/greet/greet.lua <<'LUA'
@@ -177,6 +176,9 @@ step "lua: typecheck (lua-language-server)"
 if ! skip luals; then
   if have lua-language-server; then
     just toolchain add luals
+    cat >> library/greet/BUCK <<'BUCK'
+lua_typecheck(name = "types", meta = ":meta-provided", path = "library/greet", srcs = glob(["**/*.lua"]))
+BUCK
     just test //library/greet:types
     printf 'local g = require("greet")\nreturn g.hello(1)\n' > library/greet/bad.lua
     if just test //library/greet:types >/dev/null 2>&1; then echo "expected the typecheck to fail" >&2; exit 1; fi
