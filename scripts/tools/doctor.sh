@@ -19,7 +19,6 @@ need() {
 need just
 need git
 need buck2 "just setup installs it"
-need python3
 
 if mono_module context; then
   need sqlite3 "context module"

@@ -54,7 +54,7 @@ just ci sync | run
 just mono status | update [vX.Y.Z]
 ```
 
-`just check` is the definition of green: doctor, Gherkin and front-matter checks, `buck2 build //...`, `buck2 test //...`. CI runs the same script.
+`just check` is the definition of green: doctor, Gherkin and front-matter checks (bash and awk, no interpreter needed), `buck2 build //...`, `buck2 test //...`. CI runs the same script.
 
 ## Buck2
 

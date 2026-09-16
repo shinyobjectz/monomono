@@ -136,7 +136,7 @@ cmd_check() {
   if [[ -n $slug ]]; then specs=("$project/$slug"); else
     while read -r spec; do [[ -n $spec ]] && specs+=("$spec"); done < <(iter_features "$project")
   fi
-  python3 "$MONO_HOME/scripts/update/skills.py" --root "$MONO_ROOT" --check || failed=1
+  "$MONO_HOME/scripts/update/skills.sh" --root "$MONO_ROOT" --check || failed=1
   for spec in "${specs[@]+"${specs[@]}"}"; do
     dir=$(feature_dir "${spec%%/*}" "${spec#*/}")
     is_feature "$dir" || { echo "unknown feature: $spec" >&2; failed=1; continue; }

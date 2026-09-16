@@ -70,9 +70,11 @@ mono_now() {
 
 mono_id() {
   if command -v uuidgen >/dev/null 2>&1; then
-    uuidgen | tr '[:upper:]' '[:lower:]'
+    uuidgen | tr "[:upper:]" "[:lower:]"
+  elif [[ -r /proc/sys/kernel/random/uuid ]]; then
+    cat /proc/sys/kernel/random/uuid
   else
-    python3 -c 'import uuid; print(uuid.uuid4())'
+    od -An -N16 -tx1 /dev/urandom | tr -d " \n" | sed -E "s/(.{8})(.{4})(.{4})(.{4})(.{12})/\1-\2-\3-\4-\5/"
   fi
 }
 

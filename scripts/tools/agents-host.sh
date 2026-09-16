@@ -49,8 +49,7 @@ link_or_copy() {
 }
 
 skills() {
-  require_cmd python3
-  python3 "$MONO_HOME/scripts/update/skills.py" --root "$MONO_ROOT" "$@"
+  "$MONO_HOME/scripts/update/skills.sh" --root "$MONO_ROOT" "$@"
 }
 
 case "$action" in
