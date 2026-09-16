@@ -10,6 +10,9 @@ This file is the contract for working on monomono itself. `template/.agents/AGEN
 - `template/` is the product. Files there are copied once by `mono init`, never overwritten. If a change needs to reach existing consumers, it is a migration in `migrations/<version>.sh`, not a template edit.
 - `scripts/` is the package's behavior. Bash and awk only, `set -euo pipefail`, sourced `scripts/lib.sh`. No interpreter beyond a POSIX shell host is required; buck2's own `python_bootstrap` toolchain is the prelude's, not ours. Every script has a `just` route in `mono.just`.
 - `rules/` is the `@monomono//` buck2 cell. `rules/defs.bzl` is macros over the bundled prelude. `rules/lua/` is the one set of real rules, because the prelude has no Lua and the graph for scripts is the point of the package. Add another rule family only when the prelude cannot express it.
+- `rules/lua` attribute names are frozen under `RULES_API`; a change bumps it and ships a migration. Every rule script and everything under `rules/lua/lib/mono` must run on Lua 5.1, 5.3, 5.4 and LuaJIT: `read("*a")`, `(table.unpack or unpack)`, `(loadstring or load)`, no `goto`, no `//`, no `utf8`. The self-test runs the whole tree under each.
+- Telemetry vocabulary is closed: `gen_ai.*` is adopted, `malleable.*` is minted verbatim from malleable, `monomono.*` is ours. A new name is added to `rules/lua/lib/mono/telemetry.lua` first, and the OTLP JSON stays identical to malleable’s.
+- Never edit `rules/lua/*.lua` with perl: `@word` and `$"` are interpolated. Use sed or a heredoc.
 - `toolchains/*.BUCK` are fragments. Each names a prelude system toolchain with the name the prelude expects.
 - `adapters/*.sh` implement `ensure|add|update|sync` for one ecosystem, with `PKG_DIR` set. They shell out to that ecosystem's own client.
 - Versions are semver tags `vX.Y.Z` matching `VERSION`. A breaking change to a consumer-owned file ships with a migration.
@@ -29,7 +32,8 @@ This file is the contract for working on monomono itself. `template/.agents/AGEN
 | `adapters/` | Package-ecosystem adapters. |
 | `template/` | The consumer skeleton. |
 | `migrations/` | `<version>.sh` scripts run in order on `just mono update`. |
-| `test/` | `init.sh` scaffolds and checks a throwaway consumer. |
+| `test/` | `init.sh` scaffolds two throwaway consumers and proves every feature: sh and Lua tests, bundles, hosts (C, Rust, wasm), lint/format/meta/typecheck, Gherkin + trace, coverage, hooks, 5.1/5.3/LuaJIT, lua-host/lua-config, provider refusal. `MONO_SELFTEST_SKIP` narrows it. |
+| `.github/workflows/selftest.yml` | CI: the self-test on ubuntu and macOS, on push, tags and pull requests. |
 
 ## Release
 

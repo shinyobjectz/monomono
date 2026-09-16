@@ -32,6 +32,7 @@ Toolchains and ecosystems
 
   just toolchain available       # fragments: cxx, python, rust, go, ...
   just toolchain add rust        # appends to toolchains/BUCK
+  just toolchain add lua         # hermetic Lua 5.4 (or lua-5.1, lua-5.3, luajit, lua-system, lua-config, lua-host)
   just pkg init js bun           # packages/js managed by the bun adapter
   just pkg add js zod
   just pkg sync
@@ -42,6 +43,15 @@ Areas, public repos, hosts
   just submodule add <url> [name]
   just ci sync                   # git/ci/github -> .github/workflows
   just agents sync               # root AGENTS.md + .agents/skills
+
+Lua
+
+  lua_library / lua_test / lua_binary / lua_bundle in BUCK files (@monomono//rules/lua:defs.bzl)
+  just context feature test <p> <s> --steps     # bind bdd/*.feature in test/steps.lua -> <s>-gherkin target
+  just lua repl | cover | profile | meta | fmt   # dev loop over the graph
+  just lua trace | observe <feature target>     # span tree + OTLP trace.json; trace read back as Gherkin
+  just tool <name>                              # scripts/tools/<name>.sh or .lua
+  scripts/hooks/pre-build.{sh,lua}              # runs before just build
 
 The package
 

@@ -1,21 +1,21 @@
 # __NAME__ — enter the repo through just. Package recipes come from packages/monomono; add yours below.
-# Recipe bodies call scripts/build, scripts/tools, or scripts/update. No logic here.
+# Recipe bodies call scripts/build, scripts/tools, or scripts/update. A script is <name>.sh or <name>.lua. No logic here.
 
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
 import 'packages/monomono/mono.just'
 
-# scripts/build/<target>.sh (for steps buck2 cannot own yet)
+# scripts/build/<target>.{sh,lua} (for steps buck2 cannot own yet)
 [positional-arguments]
 build-script target *args:
-    @./scripts/build/"$1".sh "${@:2}"
+    @"{{mono_home}}/scripts/tools/run-script.sh" build "$@"
 
-# scripts/tools/<name>.sh
+# scripts/tools/<name>.{sh,lua}
 [positional-arguments]
 tool name *args:
-    @./scripts/tools/"$1".sh "${@:2}"
+    @"{{mono_home}}/scripts/tools/run-script.sh" tools "$@"
 
-# scripts/update/<target>.sh
+# scripts/update/<target>.{sh,lua}
 [positional-arguments]
 update target *args:
-    @./scripts/update/"$1".sh "${@:2}"
+    @"{{mono_home}}/scripts/tools/run-script.sh" update "$@"

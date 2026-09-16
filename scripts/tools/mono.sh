@@ -33,12 +33,13 @@ scaffold() {
 }
 
 cmd_init() {
-  local mode="submodule" repo="$MONO_REPO_URL" name=""
+  local mode="submodule" repo="$MONO_REPO_URL" name="" provider=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --mode) mode=$2; shift 2 ;;
       --repo) repo=$2; shift 2 ;;
       --name) name=$2; shift 2 ;;
+      --provider) provider=$2; shift 2 ;;
       *) usage ;;
     esac
   done
@@ -49,6 +50,7 @@ cmd_init() {
   toml_set monomono mode "$mode"
   toml_set monomono path "$(rel "$MONO_HOME")"
   toml_set monomono repo "$repo"
+  [[ -z $provider ]] || toml_set monomono provider "$provider"
   toml_set repo name "$name"
   cmd_sync
   echo
@@ -66,6 +68,8 @@ cmd_status() {
   echo "installed   $MONO_VERSION"
   echo "manifest    ${pinned:-none}"
   echo "mode        ${mode:-unknown}"
+  local provider; provider=$(toml_get monomono provider || true)
+  [[ -z $provider ]] || echo "provider    $provider"
   echo "repo        $(mono_repo_name)"
   if [[ -d $MONO_HOME/.git || -f $MONO_HOME/.git ]]; then
     echo "git         $(git -C "$MONO_HOME" describe --tags --always 2>/dev/null)"
@@ -101,7 +105,11 @@ cmd_migrate() {
 }
 
 cmd_update() {
-  local ref=${1-} mode from repo
+  local ref=${1-} mode from repo provider
+  provider=$(toml_get monomono provider || true)
+  if [[ -n $provider ]]; then
+    die "monomono is provided by $provider; update the app, not the package"
+  fi
   mode=$(toml_get monomono mode || true)
   repo=$(toml_get monomono repo || true)
   [[ -n $repo ]] || repo=$MONO_REPO_URL

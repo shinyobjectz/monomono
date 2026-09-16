@@ -13,6 +13,7 @@ usage:
   just context feature status <project> <slug>
   just context feature check [project [slug]]
   just context feature test <project> <slug> <name> [--lua]
+  just context feature test <project> <slug> --steps     # bind bdd/*.feature in test/steps.lua
 USAGE
   exit 2
 }
@@ -92,7 +93,9 @@ load("@monomono//rules:defs.bzl", "mono_feature_tests")
 
 mono_feature_tests(
     name = "${slug}",
-    tests = glob(["test/*.sh", "test/*.lua"]),
+    tests = glob(["test/*.sh", "test/*.lua"], exclude = ["test/steps.lua"]),
+    features = glob(["bdd/*.feature"]),
+    steps = glob(["test/steps.lua"]),
 )
 BUCK
   echo "created $(rel "$dest")  stage=spec"
@@ -149,8 +152,29 @@ cmd_check() {
   echo "gherkin ok (${#specs[@]} feature(s))"
 }
 
+# Bind the Gherkin: test/steps.lua with a skeleton per unbound sentence, so bdd/*.feature becomes a traced test target.
+cmd_steps() {
+  local project=$1 slug=$2 dir
+  dir=$(feature_dir "$project" "$slug")
+  is_feature "$dir" || die "unknown feature: $project/$slug"
+  local dest="$dir/test/steps.lua"
+  local lua lib
+  lua=$(buck2_out "toolchains//:lua-build[lua]")
+  lib=$(buck2_out "monomono//rules/lua:lib")
+  [[ -n $lua && -n $lib ]] || die "toolchains//:lua is not declared (just toolchain add lua)"
+  local skel
+  skel=$(cd "$MONO_ROOT" && LUA_PATH="$lib/lib/?.lua;$lib/lib/?/init.lua;;" "$MONO_ROOT/$lua" "$MONO_HOME/rules/lua/skeletons.lua" "$([[ -f $dest ]] && echo "$dest")" "$dir"/bdd/*.feature)
+  if [[ ! -f $dest ]]; then
+    printf -- '-- Step definitions for %s. Placeholders: {int} {float} {word} {string} {value}. ctx is per scenario.\nlocal steps = require("mono.steps")\n\n' "$(rel "$dir")/bdd" >"$dest"
+  fi
+  if [[ -n $skel ]]; then printf '%s\n' "$skel" >>"$dest"; echo "added $(grep -c "^steps\." <<<"$skel") step skeleton(s) to $(rel "$dest")"; else echo "every sentence is bound"; fi
+  rm -f "$dir/test/.gitkeep"
+  echo "run: just test //$(rel "$dir"):${slug}-gherkin   (MONO_TRACE=1 prints the span tree)"
+}
+
 cmd_test() {
   local project=${1-} slug=${2-} name=${3-} lang=sh
+  if [[ $name == --steps ]]; then cmd_steps "$project" "$slug"; return; fi
   [[ ${4-} == --lua ]] && lang=lua
   [[ -n $project && -n $slug && -n $name ]] || usage
   local dir; dir=$(feature_dir "$project" "$slug")

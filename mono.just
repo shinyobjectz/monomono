@@ -85,3 +85,8 @@ submodule *args:
 [positional-arguments]
 ci *args:
     @"{{mono_home}}/scripts/tools/ci.sh" "$@"
+
+# Lua dev loop: repl | run | cover | profile | meta | fmt | trace | observe | script | version
+[positional-arguments]
+lua *args:
+    @"{{mono_home}}/scripts/tools/lua.sh" "$@"

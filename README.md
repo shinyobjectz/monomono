@@ -36,12 +36,13 @@ AGENTS.md            -> .agents/AGENTS.md, the repo contract (yours)
 CLAUDE.md            Claude Code bootstrap
 .buckroot .buckconfig BUCK
 toolchains/BUCK      genrule, python_bootstrap, test. Nothing else until you add it.
+.buckconfig.local    per-machine paths (an interpreter, a host program); gitignored
 app/                 deliverables
 library/             shared code, one folder per domain
 packages/<eco>/      third-party manifests and lockfiles, behind an adapter
 packages/monomono/   this package, pinned to a release
 context/             sqlite junk drawer + projects/<p>/features/<f>/{bdd,test,BUCK}
-scripts/             your just backends: build/ tools/ update/
+scripts/             your just backends: build/ tools/ update/ as .sh or .lua; hooks/pre-build
 git/ci/              CI source; .github/workflows is a generated copy
 submodules/          public repos as git submodules
 .agents/             standing rules and generated skills
@@ -64,30 +65,47 @@ just submodule add <url>
 just agents sync                             root AGENTS.md link + .agents/skills
 just ci sync | run
 just mono status | update [vX.Y.Z]
+just lua repl | run | cover | profile | meta | fmt | trace | observe | script
 ```
 
 `just check` is the definition of green: doctor, Gherkin and front-matter checks (bash and awk, no interpreter needed), `buck2 build //...`, `buck2 test //...`. CI runs the same script.
 
 ## Buck2
 
-The consumer is the buck2 project root. `.buckconfig` declares the bundled prelude, `toolchains//`, and `monomono//` (this package as a cell). `toolchains/BUCK` starts with the three toolchains needed to run a genrule and a test, and `just toolchain add <name>` appends a fragment for cxx, python, rust, go, haskell, or ocaml, hoisting `load()` lines to the top. Feature tests are `sh_test` targets under `context/`, so the lifecycle is enforced by the same graph that builds the product. Swap the generated `sh_test` for your language's test rule when you have one.
+The consumer is the buck2 project root. `.buckconfig` declares the bundled prelude, `toolchains//`, and `monomono//` (this package as a cell). `toolchains/BUCK` starts with the three toolchains needed to run a genrule and a test, and `just toolchain add <name>` appends a fragment for cxx, python, rust, go, haskell, ocaml, or one of the Lua toolchains, hoisting `load()` lines to the top. Feature tests are `sh_test` targets under `context/`, so the lifecycle is enforced by the same graph that builds the product. Swap the generated `sh_test` for your language's test rule when you have one.
 
 `@monomono//rules:defs.bzl` exposes small macros: `mono_check` (a shell test from the repo root), `mono_script` (a runnable), `mono_feature_tests` (one target per test file plus a suite).
 
 ## Lua
 
-The prelude has no Lua rules, so monomono ships them. `just toolchain add lua` declares a hermetic Lua 5.4.7 built once from pinned source into buck-out (`lua-system` uses whatever is on PATH), and `@monomono//rules/lua:defs.bzl` gives every `.lua` file a place in the graph.
+The prelude has no Lua rules, so monomono ships them. `just toolchain add lua` declares a hermetic Lua 5.4.7 built once from pinned source into buck-out. `lua-5.1`, `lua-5.3` and `luajit` are the same thing for other interpreters; `lua-system` uses whatever is on PATH; `lua-config` reads `[lua] bin` from `.buckconfig.local`; `lua-host` has no interpreter at all and runs every test and binary through `[lua] host = <program>`, which is what an app with its own embedded runtime wants. Any target can also name its own interpreter with `toolchain = "toolchains//:luajit"`.
+
+`@monomono//rules/lua:defs.bzl` gives every `.lua` file a place in the graph:
 
 ```
-lua_library(name, srcs, deps, root)     modules on LUA_PATH; every build runs luac -p on each file
-lua_binary(name, main, deps)            just run //app/x -- args
-lua_test(name, src, deps)               just test //library/x:test
-lua_bundle(name, main, deps, bytecode)  one file: package.preload per module, then main
-lua_embed(name, src, lang, symbol)      the bundle as a C header or Rust source
-lua_cxx_library(name)                   the hermetic interpreter as a C library, for a host that embeds it
+lua_library(name, srcs, deps, root, cpath, resources)   modules on LUA_PATH, C modules on LUA_CPATH, data via require("mono.resource"); luac -p on every build
+lua_binary(name, main, deps)                           just run //app/x -- args
+lua_test(name, src, deps) / lua_tests(name, srcs)       require("mono.spec") for named cases and TAP output
+lua_repl(name, deps)                                   an interpreter with those libraries on the path
+lua_bundle(name, main, deps, dialect, bytecode)        one file, package.preload per module with its real chunk name; dialect 5.1|5.3|5.4|jit|portable is a gate
+lua_embed(name, src, lang, symbol)                     the bundle as a C header or Rust source
+lua_wasm(name, src)                                    the bundle as an ES module for wasmoon in the browser
+lua_meta(name, deps, provided)                         LuaLS ---@meta stubs + .luarc.json; hand-written stubs win
+lua_typecheck(name, meta, path, srcs)                  lua-language-server --check as a test (toolchains//:luals)
+lua_lint(name, srcs) / lua_format(name, srcs)          luacheck and stylua --check as tests; [fix] rewrites
+lua_feature_test(name, features, steps, runner)        Gherkin scenarios against a steps file, or your own runner
+lua_cxx_library(name)                                  the interpreter as a C library for a host that embeds it
 ```
 
-Feature tests written as `test/*.lua` run the same way (`just context feature test p s name --lua`). A `luarocks` adapter keeps third-party rocks under `packages/lua`; expose the tree as a `lua_library` root. Business logic in Lua, hosts in anything: a Rust host takes the `.rs` embed and `mlua`, a C host links `lua_cxx_library`, the BEAM loads the bundle through luerl. Each host stays in its own area; the graph is shared.
+`just lua` is the dev loop over the same graph: `repl`, `run`, `cover` (lcov-style `coverage.txt`), `profile`, `meta` (writes `.luarc.json` and `.lua-meta/` for the editor), `fmt`, `trace`, `observe`, `script`. Scripts under `scripts/{build,tools,update}/<name>.lua` are just backends like their `.sh` neighbours, run under the hermetic interpreter with `scripts/lib/` and the `mono` stdlib on the path; `scripts/hooks/pre-build.{sh,lua}` runs before every `just build`.
+
+### Gherkin and telemetry
+
+`just context feature test <project> <slug> --steps` binds `bdd/*.feature` in `test/steps.lua` (`require("mono.steps")` with `{string}`, `{int}`, `{float}`, `{word}`, `{value}` placeholders) and the feature BUCK gets a `<slug>-gherkin` target. The runner prints TAP, counts undefined sentences instead of passing them, and records every feature, scenario and step as a span in the [malleable](https://github.com/shinyobjectz/malleable) shape (`monomono.feature` → `malleable.scenario` → `monomono.step`, with `malleable.outcome`). `just lua trace` prints the tree and writes OTLP JSON to `trace.json`; `just lua observe` reads a trace back as Gherkin; `MONO_REPORT_OUT` writes one JSON row per scenario for an app to ingest. `require("mono.telemetry")` is the same recorder for application code, so an app’s own spans and its feature runs land in one trace.
+
+### Hosts
+
+Business logic in Lua, hosts in anything. A C host links `lua_cxx_library` and loads the embedded bundle; a Rust host does the same over the C API with no cargo (`mapped_srcs` takes the `.rs` embed), or takes the bundle into `mlua`; the browser gets `lua_wasm`; the BEAM loads the bundle through luerl. An app that ships its own interpreter declares `lua-host`, and an app that vendors this package writes `provider = "<app>"` in `mono.toml` so `just mono update` refuses and the app owns upgrades.
 
 ## Versioning
 

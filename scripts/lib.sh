@@ -148,3 +148,8 @@ mono_drop_legacy_link() {
     echo "removed legacy .mono link"
   fi
 }
+
+# Output path of a buck2 target (sub-targets allowed). Non-root cells need the platform stated.
+buck2_out() {
+  (cd "$MONO_ROOT" && buck2 build "$1" --target-platforms prelude//platforms:default --show-simple-output 2>/dev/null | tail -n 1)
+}

@@ -1,0 +1,35 @@
+name: selftest
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+# Scaffold a throwaway consumer from this checkout and prove every feature (test/init.sh).
+# Hermetic Lua builds from source, so the runner needs make + cc; the rest comes from buck2.
+
+jobs:
+  selftest:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: extractions/setup-just@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: oven-sh/setup-bun@v2
+      - name: buck2 + monomono bootstrap
+        run: |
+          ./install.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: zstd (buck2 archives)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y zstd
+      - name: lua-language-server
+        if: runner.os == 'macOS'
+        run: brew install lua-language-server
+      - run: git config --global user.email ci@monomono && git config --global user.name ci
+      - run: just selftest

@@ -18,8 +18,12 @@ need() {
 }
 
 need just
-need git
 need buck2 "just setup installs it"
+mode=$(toml_get monomono mode || true)
+if [[ $mode == submodule || -z $mode ]]; then need git; elif command -v git >/dev/null 2>&1; then pass "git $(git --version | cut -c1-40)"; else note "git not installed (optional: the package is ${mode})"; fi
+if [[ -f $MONO_TOOLCHAINS/BUCK ]] && grep -qE "^# monomono:toolchain (lua|lua-5\.[13]|luajit)$" "$MONO_TOOLCHAINS/BUCK"; then
+  for t in make cc; do command -v $t >/dev/null 2>&1 && pass "$t (hermetic lua toolchain)" || bad "missing $t; the hermetic lua toolchain builds from source (or use lua-config / lua-host)"; done
+fi
 
 if mono_module context; then
   need sqlite3 "context module"
@@ -37,13 +41,16 @@ else
 fi
 
 if [[ $MONO_HOME != "$MONO_ROOT" ]]; then
-  if [[ -f $MONO_ROOT/.gitmodules ]] && grep -q 'path = packages/monomono' "$MONO_ROOT/.gitmodules"; then
-    pass "packages/monomono is a submodule ($(git -C "$MONO_HOME" describe --tags --always 2>/dev/null))"
-  elif [[ $(toml_get monomono mode) == vendor ]]; then
-    pass "packages/monomono is vendored"
+  provider=$(toml_get monomono provider || true)
+  by=${provider:+ by $provider}
+  if [[ $(toml_get monomono mode) == vendor ]]; then
+    pass "packages/monomono is vendored$by"
+  elif [[ -f $MONO_ROOT/.gitmodules ]] && grep -q 'path = packages/monomono' "$MONO_ROOT/.gitmodules"; then
+    pass "packages/monomono is a submodule ($(git -C "$MONO_HOME" describe --tags --always 2>/dev/null))$by"
   else
-    note "packages/monomono is neither a submodule nor marked vendor in mono.toml"
+    note "packages/monomono is neither a submodule nor marked vendor in mono.toml$by"
   fi
+  [[ -z $provider ]] || pass "provided by $provider; just mono update refuses, the app owns upgrades"
 fi
 
 if [[ $(toml_get monomono mode) == self ]]; then

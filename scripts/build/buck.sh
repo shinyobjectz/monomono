@@ -8,6 +8,13 @@ cd "$MONO_ROOT"
 
 verb=${1:-build}
 shift || true
+if [[ $verb == build ]]; then
+  for hook in "$MONO_ROOT/scripts/hooks/pre-build.sh" "$MONO_ROOT/scripts/hooks/pre-build.lua"; do
+    [[ -f $hook ]] || continue
+    "$MONO_HOME/scripts/tools/run-script.sh" hooks pre-build
+    break
+  done
+fi
 case "$verb" in
   build|test|targets)
     if [[ $# -eq 0 ]]; then

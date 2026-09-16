@@ -2,7 +2,7 @@
 -- The input file as bytes in C or Rust source, so a host binary carries its Lua inline.
 local out, lang, sym, input = arg[1], arg[2], arg[3], arg[4]
 local f = assert(io.open(input, "rb"))
-local data = f:read("a")
+local data = f:read("*a")
 f:close()
 local o = assert(io.open(out, "wb"))
 local parts = {}
