@@ -147,6 +147,7 @@ cmd_update() {
 }
 
 cmd_sync() {
+  mono_drop_legacy_link
   "$MONO_HOME/scripts/tools/agents-host.sh" sync
   if [[ -d $MONO_CI/github ]]; then
     "$MONO_HOME/scripts/tools/ci.sh" sync

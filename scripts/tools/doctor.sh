@@ -4,6 +4,7 @@
 source "$(cd "$(dirname "$0")/.." && pwd)/lib.sh"
 
 ok=0; warn=0; fail=0
+mono_drop_legacy_link
 pass() { echo "ok    $*"; ok=$((ok + 1)); }
 note() { echo "warn  $*"; warn=$((warn + 1)); }
 bad()  { echo "fail  $*" >&2; fail=$((fail + 1)); }

@@ -139,3 +139,12 @@ version_lt() {
 in_git_repo() {
   git -C "$MONO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1
 }
+
+# After the 0.2.0 move a migration leaves `.mono -> packages/monomono` so the old updater can finish.
+mono_drop_legacy_link() {
+  if [[ -L $MONO_ROOT/.mono && $(cd "$MONO_ROOT/.mono" 2>/dev/null && pwd -P) == "$(cd "$MONO_HOME" && pwd -P)" ]]; then
+    rm -f "$MONO_ROOT/.mono"
+    git -C "$MONO_ROOT" rm -q --cached .mono 2>/dev/null || true
+    echo "removed legacy .mono link"
+  fi
+}
