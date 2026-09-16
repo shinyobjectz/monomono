@@ -46,13 +46,17 @@ if [[ $MONO_HOME != "$MONO_ROOT" ]]; then
   fi
 fi
 
-for f in .buckroot .buckconfig BUCK toolchains/BUCK; do
-  [[ -e $MONO_ROOT/$f ]] && pass "$f" || bad "$f missing; just mono sync"
-done
-if [[ -f $MONO_ROOT/.buckconfig ]] && grep -qE '^\s*monomono\s*=' "$MONO_ROOT/.buckconfig"; then
-  pass ".buckconfig declares the monomono cell"
+if [[ $(toml_get monomono mode) == self ]]; then
+  pass "package self-mode; buck2 project checks skipped"
 else
-  note ".buckconfig has no monomono cell; @monomono// rules unavailable"
+  for f in .buckroot .buckconfig BUCK toolchains/BUCK; do
+    [[ -e $MONO_ROOT/$f ]] && pass "$f" || bad "$f missing; just mono sync"
+  done
+  if [[ -f $MONO_ROOT/.buckconfig ]] && grep -qE '^\s*monomono\s*=' "$MONO_ROOT/.buckconfig"; then
+    pass ".buckconfig declares the monomono cell"
+  else
+    note ".buckconfig has no monomono cell; @monomono// rules unavailable"
+  fi
 fi
 
 if [[ -f $MONO_ROOT/justfile ]] && grep -qE "^import .*mono\.just" "$MONO_ROOT/justfile"; then

@@ -13,7 +13,7 @@ This file is the contract for working on monomono itself. `template/.agents/AGEN
 - `toolchains/*.BUCK` are fragments. Each names a prelude system toolchain with the name the prelude expects.
 - `adapters/*.sh` implement `ensure|add|update|sync` for one ecosystem, with `PKG_DIR` set. They shell out to that ecosystem's own client.
 - Versions are semver tags `vX.Y.Z` matching `VERSION`. A breaking change to a consumer-owned file ships with a migration.
-- This repo is its own first consumer: root `justfile` imports `mono.just`, `.buckconfig` aliases `monomono` to `root`. `just selftest` scaffolds a throwaway consumer and runs its `just check`.
+- This repo is its own first consumer for `just`: root `justfile` imports `mono.just` and `mono.toml` says `mode = "self"`. It is not a buck2 project root, because a nested cell may not carry its own `[cells]`; `just selftest` scaffolds a throwaway consumer and runs its `just check` instead.
 - Only prose: `AGENTS.md`, `README.md`, and `LICENSE`. Usage is `just --list` and script headers.
 
 ## Folders
@@ -24,7 +24,7 @@ This file is the contract for working on monomono itself. `template/.agents/AGEN
 | `mono.just` | Recipes every consumer imports. |
 | `scripts/` | Behavior behind those recipes. `lib.sh`, `build/`, `tools/`, `update/`. |
 | `rules/` | Starlark macros, the `@monomono//` cell. |
-| `toolchains/` | Toolchain fragments, plus this repo's own `toolchains/BUCK`. |
+| `toolchains/` | Toolchain fragments (`<name>.BUCK`). |
 | `adapters/` | Package-ecosystem adapters. |
 | `template/` | The consumer skeleton. |
 | `migrations/` | `<version>.sh` scripts run in order on `just mono update`. |
