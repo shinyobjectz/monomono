@@ -153,3 +153,53 @@ mono_drop_legacy_link() {
 buck2_out() {
   (cd "$MONO_ROOT" && buck2 build "$1" --target-platforms prelude//platforms:default --show-simple-output 2>/dev/null | tail -n 1)
 }
+
+# buckconfig_get <section> <key>: .buckconfig.local first, then .buckconfig (what read_root_config sees)
+buckconfig_get() {
+  local f
+  for f in "$MONO_ROOT/.buckconfig.local" "$MONO_ROOT/.buckconfig"; do
+    [[ -f $f ]] || continue
+    local v
+    v=$(awk -v s="[$1]" -v k="$2" '/^\[/ { insec = ($0 == s) } insec && $1 == k { sub(/^[^=]*=[ \t]*/, ""); print; exit }' "$f")
+    [[ -z $v ]] || { printf '%s\n' "$v"; return 0; }
+  done
+  return 1
+}
+
+# The interpreter behind toolchains//:lua, whichever fragment declared it: hermetic build, PATH, or [lua] bin. Empty under lua-host alone.
+lua_bin() {
+  local tc="$MONO_TOOLCHAINS/BUCK"
+  [[ -f $tc ]] || return 0
+  if grep -qE '^# monomono:toolchain (lua|lua-5\.[13]|luajit)$' "$tc"; then
+    local p; p=$(buck2_out "toolchains//:lua-build[lua]"); [[ -z $p ]] || printf '%s\n' "$MONO_ROOT/$p"
+  elif grep -q '^# monomono:toolchain lua-system$' "$tc"; then
+    command -v lua || true
+  else
+    buckconfig_get lua bin || true
+  fi
+}
+
+# The host command under lua-host, as an array: <host> [host_args...] <file> -- args. Sets HOST_CMD.
+lua_host_cmd() {
+  HOST_CMD=()
+  local h; h=$(buckconfig_get lua host || true)
+  [[ -n $h ]] || return 0
+  HOST_CMD=("$h")
+  local extra; extra=$(buckconfig_get lua host_args || true)
+  if [[ -n $extra ]]; then local extra_arr; read -r -a extra_arr <<<"$extra"; HOST_CMD+=("${extra_arr[@]}"); fi
+}
+lua_host() { lua_host_cmd; printf '%s\n' "${HOST_CMD[0]-}"; }
+
+# lua_run <file> [args]: run a repo Lua file the way toolchains//:lua would, with the mono stdlib on the path.
+lua_run() {
+  local file=$1; shift
+  local lib; lib=$(buck2_out "monomono//rules/lua:lib")
+  [[ -n $lib ]] || die "cannot build the mono stdlib (monomono//rules/lua:lib)"
+  export LUA_PATH="$MONO_ROOT/scripts/lib/?.lua;$MONO_ROOT/scripts/lib/?/init.lua;$MONO_ROOT/$lib/lib/?.lua;$MONO_ROOT/$lib/lib/?/init.lua;${LUA_PATH:-;}"
+  local bin host
+  bin=$(lua_bin); lua_host_cmd
+  if [[ ${#HOST_CMD[@]} -gt 0 && -f $MONO_TOOLCHAINS/BUCK ]] && grep -q '^# monomono:toolchain lua-host$' "$MONO_TOOLCHAINS/BUCK"; then exec "${HOST_CMD[@]}" "$file" -- "$@"   # lua-host: the host wins, as for tests
+  elif [[ -n $bin ]]; then exec "$bin" "$file" "$@"
+  elif [[ ${#HOST_CMD[@]} -gt 0 ]]; then exec "${HOST_CMD[@]}" "$file" -- "$@"
+  else die "toolchains//:lua is not declared (just toolchain add lua, lua-config, or lua-host)"; fi
+}

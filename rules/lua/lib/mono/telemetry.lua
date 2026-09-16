@@ -1,17 +1,19 @@
---- Telemetry: spans in malleable's shape, malleable's closed vocabulary, OTLP out.
+--- Telemetry: spans with a closed vocabulary, rendered as OTLP JSON, a tree, or Gherkin.
 ---
---- A span is { id, parent, name, at, ms, ok, attrs }. `attrs` never carries a payload
---- (malleable rule 8): every key is in the vocabulary below or `close_span` refuses it.
---- The scenario is the join: `malleable.scenario {name}` roots a Gherkin run, so a
---- collector trace is attributable to the sentence in the feature file.
+--- A span is { id, parent, name, at, ms, ok, attrs }. `attrs` never carries a payload:
+--- every key is in the vocabulary or `close_span` refuses it. The vocabulary is small by
+--- default (OpenTelemetry GenAI names plus monomono's own) and a consumer extends or renames
+--- it with `vocabulary(profile)`, so an app's collector sees its own names, not this package's.
 ---
---- Compatible with malleable's `trace.lua` (VOCABULARY 1) and typeaway's TraceSpan.
---- This module opens no socket and requires nothing; transport is the host's.
+--- A profile is { adopted = {names...}, minted = {name = rule...}, names = {feature=, scenario=,
+--- step=, outcome=, undefined=, unclosed=, run=, kind=}, events = function(event) -> name, attrs, ok }.
+--- The feature runner loads MONO_TELEMETRY_PROFILE (a module name) before any span opens; a steps
+--- file may call vocabulary() itself. This module opens no socket and requires nothing.
 local T = {}
 
 T.VOCABULARY = 1
 
---- OpenTelemetry GenAI names, verbatim (as malleable adopts them).
+--- OpenTelemetry GenAI semantic-convention names, verbatim.
 T.ADOPTED = {
   "gen_ai.operation.name", "gen_ai.provider.name", "gen_ai.agent.name",
   "gen_ai.request.model", "gen_ai.response.model",
@@ -19,37 +21,37 @@ T.ADOPTED = {
   "gen_ai.tool.name", "gen_ai.tool.call.id",
 }
 
---- malleable's minted names, verbatim, plus monomono's own under its prefix.
+--- What a build graph and a feature runner say about themselves.
 T.MINTED = {
-  ["malleable.stop"]          = { "answered", "budget", "refused", "error" },
-  ["malleable.steps"]         = "number",
-  ["malleable.budget"]        = "number",
-  ["malleable.calls"]         = "number",
-  ["malleable.tools"]         = "number",
-  ["malleable.cached_tokens"] = "number",
-  ["malleable.skills"]        = "number",
-  ["malleable.act"]           = { set = { "builds", "commits", "connects", "deletes", "escalates", "inspects",
-                                          "installs", "publishes", "reads", "tests", "writes" } },
-  ["malleable.unplaced"]      = "number",
-  ["malleable.notes"]         = "number",
-  ["malleable.depth"]         = "number",
-  ["malleable.gate.answer"]   = { "allowed", "edited", "refused", "stopped", "absent" },
-  ["malleable.refused_by"]    = { "gate", "hook", "error" },
-  ["malleable.requirement"]   = { "unmet" },
-  ["malleable.unclosed"]      = "boolean",
-  ["malleable.dropped"]       = "number",
-  ["malleable.outcome"]       = { "passed", "failed", "undefined", "broken", "skipped" },
-  ["malleable.undefined"]     = "number",
-  ["malleable.samples"]       = "number",
-  ["malleable.rate"]          = "number",
-  -- monomono: what a build graph and a feature runner have that an agent harness does not
-  ["monomono.keyword"]        = { "given", "when", "then" },
-  ["monomono.scenarios"]      = "number",
-  ["monomono.steps"]          = "number",
-  ["monomono.passed"]         = "number",
-  ["monomono.failed"]         = "number",
-  ["monomono.kind"]           = { "start", "call", "when", "refused", "error", "stop", "halt" },
+  ["monomono.keyword"]   = { "given", "when", "then" },
+  ["monomono.scenarios"] = "number",
+  ["monomono.steps"]     = "number",
+  ["monomono.passed"]    = "number",
+  ["monomono.failed"]    = "number",
+  ["monomono.undefined"] = "number",
+  ["monomono.outcome"]   = { "passed", "failed", "undefined", "broken", "skipped" },
+  ["monomono.unclosed"]  = "boolean",
+  ["monomono.kind"]      = "string",
 }
+
+--- Span and attribute names the runner uses; a profile renames them (a scenario may be an app's join span).
+T.names = {
+  feature = "monomono.feature", scenario = "monomono.scenario", step = "monomono.step",
+  outcome = "monomono.outcome", undefined = "monomono.undefined", unclosed = "monomono.unclosed",
+  run = "monomono.run", kind = "monomono.kind", keyword = "monomono.keyword",
+}
+
+T.events = nil   -- a profile's mapping from an app's flat run events to spans
+
+--- Extend or rename the vocabulary. Adopted names are appended, minted rules merged, names overridden.
+function T.vocabulary(profile)
+  for _, n in ipairs(profile.adopted or {}) do T.ADOPTED[#T.ADOPTED + 1] = n end
+  for k, rule in pairs(profile.minted or {}) do T.MINTED[k] = rule end
+  for k, v in pairs(profile.names or {}) do T.names[k] = v end
+  if profile.events then T.events = profile.events end
+  if profile.version then T.VOCABULARY = profile.version end
+  return T
+end
 
 function T.attributes()
   local out = {}
@@ -65,13 +67,9 @@ function T.allowed(name, value)
     for i = 1, #T.ADOPTED do if T.ADOPTED[i] == name then return true end end
     return false, string.format("%q is not in the vocabulary", name)
   end
-  if closed == "number" then
-    if type(value) == "number" then return true end
-    return false, string.format("%s is a number, and this is a %s", name, type(value))
-  end
-  if closed == "boolean" then
-    if type(value) == "boolean" then return true end
-    return false, string.format("%s is a boolean, and this is a %s", name, type(value))
+  if closed == "number" or closed == "boolean" or closed == "string" then
+    if type(value) == closed then return true end
+    return false, string.format("%s is a %s, and this is a %s", name, closed, type(value))
   end
   if type(closed.set) == "table" then
     if type(value) ~= "string" or value == "" then return false, name .. " is a comma-joined set of terms" end
@@ -86,8 +84,8 @@ function T.allowed(name, value)
   return false, string.format("%s is one of %s, and this is %q", name, table.concat(closed, ", "), tostring(value))
 end
 
---- A recorder: open_span / close_span / close_all, the same surface as malleable's turn.recorder.
---- `clock()` returns milliseconds. `spans` is the authoritative list, in open order.
+--- A recorder: open_span / close_span / close_all. `clock()` returns milliseconds.
+--- `spans` is the authoritative list, in open order.
 function T.recorder(clock)
   if not clock then
     local osclock = (type(os) == "table") and os.clock or nil
@@ -119,12 +117,12 @@ function T.recorder(clock)
     return s
   end
   function R.close_all()
-    for _, s in pairs(R.open) do R.close_span(s, { ["malleable.unclosed"] = true }, false) end
+    for _, s in pairs(R.open) do R.close_span(s, { [T.names.unclosed] = true }, false) end
   end
   return R
 end
 
--- rendering (byte-for-byte the shape malleable's trace.otlp writes)
+-- rendering: OTLP/JSON as a collector expects it, keys sorted, ids deterministic
 local function esc(s)
   s = tostring(s)
   s = s:gsub("\\", "\\\\"):gsub('"', '\\"')
@@ -173,6 +171,10 @@ function T.otlp(spans, ids)
     esc(service), esc(scope), T.VOCABULARY, table.concat(out, ","))
 end
 
+local function short(key)
+  return (key:gsub("^[%w_]+%.", ""))
+end
+
 --- The trace as an indented tree, for a person at a terminal.
 function T.render(spans)
   local kids, roots = {}, {}
@@ -184,7 +186,7 @@ function T.render(spans)
   local function walk(s, depth)
     local marks = {}
     for _, key in ipairs(sorted_keys(s.attrs or {})) do
-      marks[#marks + 1] = key:gsub("^malleable%.", ""):gsub("^gen_ai%.", ""):gsub("^monomono%.", "") .. "=" .. tostring(s.attrs[key])
+      marks[#marks + 1] = short(key) .. "=" .. tostring(s.attrs[key])
     end
     out[#out + 1] = string.format("%s%s%s  %dms%s", string.rep("  ", depth), s.ok == false and "! " or "", s.name, s.ms or 0, #marks > 0 and ("  " .. table.concat(marks, " ")) or "")
     for _, c in ipairs(kids[s.id] or {}) do walk(c, depth + 1) end
@@ -194,60 +196,64 @@ function T.render(spans)
   return table.concat(out, "\n") .. "\n"
 end
 
---- The other direction, as malleable rules it: a trace is read back out AS a scenario.
+local function strip(name, prefix)
+  if name:sub(1, #prefix + 1) == prefix .. " " then return name:sub(#prefix + 2) end
+  return nil
+end
+
+--- The other direction: a trace is read back out AS a scenario.
 --- Scenario spans become `Scenario:` lines, step spans become their sentences, outcomes become tags.
 function T.observe(spans)
+  local N = T.names
   local kids, roots = {}, {}
   for _, s in ipairs(spans) do
     if s.parent then kids[s.parent] = kids[s.parent] or {}; table.insert(kids[s.parent], s) else roots[#roots + 1] = s end
   end
   local out = {}
-  local function feature(s)
-    local path = s.name:match("^monomono%.feature (.*)$")
-    if path then out[#out + 1] = "# from " .. path end
-    for _, c in ipairs(kids[s.id] or {}) do
-      local name = c.name:match("^malleable%.scenario (.*)$")
-      if name then
-        local outcome = c.attrs and c.attrs["malleable.outcome"]
-        if outcome then out[#out + 1] = "@" .. outcome end
-        out[#out + 1] = "Scenario: " .. name
-        for _, st in ipairs(kids[c.id] or {}) do
-          local text = st.name:match("^monomono%.step (.*)$")
-          if text then
-            local kw = st.attrs and st.attrs["monomono.keyword"] or "and"
-            out[#out + 1] = "  " .. (kw:sub(1, 1):upper() .. kw:sub(2)) .. " " .. text
-          end
-        end
-        out[#out + 1] = ""
+  local function scenario(c)
+    local name = strip(c.name, N.scenario)
+    if not name then return end
+    local outcome = c.attrs and c.attrs[N.outcome]
+    if outcome then out[#out + 1] = "@" .. outcome end
+    out[#out + 1] = "Scenario: " .. name
+    for _, st in ipairs(kids[c.id] or {}) do
+      local text = strip(st.name, N.step)
+      if text then
+        local kw = st.attrs and st.attrs[N.keyword] or "and"
+        out[#out + 1] = "  " .. (kw:sub(1, 1):upper() .. kw:sub(2)) .. " " .. text
       end
     end
+    out[#out + 1] = ""
   end
   for _, r in ipairs(roots) do
-    if r.name:match("^monomono%.feature ") then feature(r)
-    elseif r.name:match("^malleable%.scenario ") then feature({ id = "", name = "", kids = nil }); end
-  end
-  -- scenario spans at the root, without a feature span above them
-  for _, r in ipairs(roots) do
-    local name = r.name:match("^malleable%.scenario (.*)$")
-    if name then
-      local fake = { id = "__root", name = "" }
-      kids[fake.id] = { r }
-      feature(fake)
+    local path = strip(r.name, N.feature)
+    if path then
+      out[#out + 1] = "# from " .. path
+      for _, c in ipairs(kids[r.id] or {}) do scenario(c) end
+    else
+      scenario(r)   -- a scenario span at the root, without a feature above it
     end
   end
   return table.concat(out, "\n") .. "\n"
 end
 
---- typeaway's flat run events ({kind, thing, ...}, docs/EXECUTION.md) as spans, one per event,
---- so a machine trace and an agent trace land in one collector.
+--- An app's flat run events as spans under one run span, one per event, so a machine trace and
+--- an agent trace land in one collector. The profile's `events(e)` returns name, attrs, ok;
+--- without a profile an event is { kind, thing } and is ok unless kind is "error".
 function T.from_events(events, clock)
   local R = T.recorder(clock)
-  local root = R.open_span("monomono.run", nil, {})
+  local root = R.open_span(T.names.run, nil, {})
   for _, e in ipairs(events) do
-    local name = tostring(e.kind) .. (e.thing and (" " .. tostring(e.thing)) or (e.from and (" " .. tostring(e.from)) or ""))
-    local s = R.open_span(name, root, { ["monomono.kind"] = e.kind })
-    local ok = not (e.kind == "refused" or e.kind == "error" or e.kind == "halt")
-    R.close_span(s, {}, ok)
+    local name, attrs, ok
+    if T.events then
+      name, attrs, ok = T.events(e)
+    else
+      name = tostring(e.kind) .. (e.thing and (" " .. tostring(e.thing)) or "")
+      attrs = { [T.names.kind] = tostring(e.kind) }
+      ok = e.kind ~= "error"
+    end
+    local s = R.open_span(name, root, attrs or {})
+    R.close_span(s, {}, ok ~= false)
   end
   R.close_span(root, {}, true)
   return R.spans

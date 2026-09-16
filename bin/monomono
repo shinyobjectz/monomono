@@ -2,7 +2,7 @@
 # Bootstrap. Attaches monomono to a repo as packages/monomono and scaffolds the skeleton.
 #
 #   curl -fsSL https://raw.githubusercontent.com/shinyobjectz/monomono/main/bin/monomono | bash -s -- init
-#   monomono init [dir] [--ref v0.1.0] [--repo <url>] [--vendor] [--name <repo-name>]
+#   monomono init [dir] [--ref v0.1.0] [--repo <url>] [--vendor] [--name <repo-name>] [--provider <app>] [--no-context]
 #   monomono version                 # bootstrap version
 #   monomono upgrade                 # update the bootstrap checkout and buck2
 #   monomono doctor                  # host tools present?
@@ -28,12 +28,15 @@ latest_tag() {
 }
 
 cmd_init() {
+  EXTRA=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --ref) REF=$2; shift 2 ;;
       --repo) REPO=$2; shift 2 ;;
       --vendor) MODE="vendor"; shift ;;
       --name) NAME=$2; shift 2 ;;
+      --provider) EXTRA+=(--provider "$2"); shift 2 ;;
+      --no-context) EXTRA+=(--no-context); shift ;;
       -h|--help) usage ;;
       -*) echo "unknown flag: $1" >&2; usage ;;
       *) TARGET=$1; shift ;;
@@ -62,7 +65,8 @@ cmd_init() {
         git -C "$TARGET/packages/monomono" checkout -q "$REF"
         ;;
       vendor)
-        git -c protocol.file.allow=always clone -q --depth 1 --branch "$REF" "$REPO" "$TARGET/packages/monomono"
+        git -c protocol.file.allow=always clone -q "$REPO" "$TARGET/packages/monomono"
+        git -C "$TARGET/packages/monomono" checkout -q "$REF"
         rm -rf "$TARGET/packages/monomono/.git"
         ;;
     esac
@@ -70,7 +74,7 @@ cmd_init() {
   fi
 
   MONO_HOME="$TARGET/packages/monomono" MONO_ROOT="$TARGET" \
-    "$TARGET/packages/monomono/scripts/tools/mono.sh" init --mode "$MODE" --repo "$REPO" ${NAME:+--name "$NAME"}
+    "$TARGET/packages/monomono/scripts/tools/mono.sh" init --mode "$MODE" --repo "$REPO" ${NAME:+--name "$NAME"} ${EXTRA[@]+"${EXTRA[@]}"}
 }
 
 case "${1:-}" in

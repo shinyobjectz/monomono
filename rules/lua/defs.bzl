@@ -15,7 +15,7 @@ lua_wasm           a bundle as an ES module for wasmoon in the browser
 lua_meta           LuaLS ---@meta stubs and a .luarc.json for a set of libraries
 lua_lint           luacheck over sources, as a test (toolchains//:luacheck)
 lua_format         stylua --check over sources, as a test; [fix] sub-target rewrites (toolchains//:stylua)
-lua_feature_test   Gherkin scenarios run against a steps file, emitting a malleable-compatible span tree
+lua_feature_test   Gherkin scenarios run against a steps file, emitting a span tree in the consumer's vocabulary (MONO_TELEMETRY_PROFILE)
 """
 
 load("@monomono//rules/lua:toolchain.bzl", "LuaToolInfo", "LuaToolchainInfo")
@@ -46,7 +46,7 @@ def _tc(ctx):
 def _infos(deps):
     return [d[LuaLibraryInfo] for d in deps]
 
-def _module_name(rel, root):
+def _module_name(rel, root, prefix = ""):
     if root and rel.startswith(root + "/"):
         rel = rel[len(root) + 1:]
     if not rel.endswith(".lua"):
@@ -56,7 +56,11 @@ def _module_name(rel, root):
         name = ""
     elif name.endswith("/init"):
         name = name[:-5]
-    return name.replace("/", "."), rel
+    name = name.replace("/", ".")
+    if prefix:
+        name = prefix + "." + name if name else prefix
+        rel = prefix.replace(".", "/") + "/" + rel
+    return name, rel
 
 def _strip_root(rel, root):
     if root and rel.startswith(root + "/"):
@@ -91,7 +95,9 @@ def _runtime_name(tc):
 
 # --- wrapper ------------------------------------------------------------------
 
-def _interp_in_script(tc):
+def _interp_in_script(tc, prefer_host = True):
+    if prefer_host and tc.host:
+        return cmd_args(['"' + h + '"' for h in tc.host if h], delimiter = " ")   # lua-host: the host wins over bin
     if tc.interpreter_artifact != None:
         return cmd_args(tc.interpreter_artifact, format = '"$root/{}"')
     if tc.interpreter_path:
@@ -136,14 +142,14 @@ def _wrapper(ctx, tc, mode, main, infos, extra_args = []):
     ]
     if mode == "features":
         lines.append('cd "$root"')
-        lines.append(cmd_args('set -- "$main" ', cmd_args(extra_args, delimiter = " ", quote = "shell"), ' "$@"', delimiter = ""))
+        lines.append(cmd_args('set -- "$main" ' + ("-- " if tc.host else ""), cmd_args(extra_args, delimiter = " ", quote = "shell"), ' "$@"', delimiter = ""))
     elif mode == "repl":
         lines.append("if [[ $# -eq 0 ]]; then set -- -i; fi")
-    elif tc.interpreter == None:
-        lines.append('set -- "$main" -- "$@"')   # host command: <host> <module> -- args
+    elif tc.host:
+        lines.append('set -- "$main" -- "$@"')   # host command: <host> <module> -- args (host wins over bin; bin still serves bundle/meta/check)
     else:
         lines.append('if [[ -n $hook ]]; then set -- "$lib/mono/$hook.lua" "$main" "$@"; else set -- "$main" "$@"; fi')
-    lines.append(cmd_args("exec ", _interp_in_script(tc), ' "$@"', delimiter = ""))
+    lines.append(cmd_args("exec ", _interp_in_script(tc, prefer_host = mode != "repl"), ' "$@"', delimiter = ""))
     script, hidden = ctx.actions.write(ctx.attrs.name + ".sh", lines, is_executable = True, allow_args = True)
     inputs = hidden + roots + cpaths + [stdlib] + _interp_inputs(tc) + extra_args
     if main != None:
@@ -175,7 +181,7 @@ def _lua_library_impl(ctx):
     mods = []
     stamps = []
     for src in ctx.attrs.srcs:
-        name, rel = _module_name(src.short_path, ctx.attrs.root)
+        name, rel = _module_name(src.short_path, ctx.attrs.root, ctx.attrs.prefix)
         tree[rel] = src
         mods.append(struct(name = name, src = src))
         if tc.interpreter != None:
@@ -187,7 +193,8 @@ def _lua_library_impl(ctx):
             )
             stamps.append(stamp)
     for res in ctx.attrs.resources:
-        tree[_strip_root(res.short_path, ctx.attrs.root)] = res
+        rel = _strip_root(res.short_path, ctx.attrs.root)
+        tree[(ctx.attrs.prefix.replace(".", "/") + "/" + rel) if ctx.attrs.prefix else rel] = res
     root_dir = ctx.actions.symlinked_dir("modules", tree)
     roots, cpaths, tmods = _merge(_infos(ctx.attrs.deps))
     info = LuaLibraryInfo(roots = [root_dir] + roots, cpaths = ctx.attrs.cpath + cpaths, modules = mods + tmods)
@@ -207,6 +214,7 @@ lua_library = rule(
         "srcs": attrs.list(attrs.source()),
         "deps": _DEPS,
         "root": attrs.string(default = "", doc = "package-relative dir that is the module root"),
+        "prefix": attrs.string(default = "", doc = "module name prefix: prefix = 'hourly-check' makes compare.lua require-able as 'hourly-check.compare' even from its own BUCK"),
         "cpath": attrs.list(attrs.source(allow_directory = True), default = [], doc = "dirs holding C modules (.so)"),
         "resources": attrs.list(attrs.source(), default = [], doc = "data files, readable via require('mono.resource')"),
         "toolchain": _TC_OVERRIDE,
@@ -379,11 +387,22 @@ lua_meta = rule(
 
 def _lua_typecheck_impl(ctx):
     tool = ctx.attrs._luals[LuaToolInfo]
-    meta = ctx.attrs.meta[DefaultInfo]
-    outdir = meta.default_outputs[0]
+    if ctx.attrs.meta == None and ctx.attrs.luarc == None:
+        fail("lua_typecheck: pass meta (generated stubs + luarc) or luarc (your own .luarc.json), or both")
+    meta = ctx.attrs.meta[DefaultInfo] if ctx.attrs.meta != None else None
+    outdir = meta.default_outputs[0] if meta != None else None
     # hand-written stubs under `path` are already in the meta dir; seen twice they report duplicate fields
     prefix = ctx.attrs.path.rstrip("/") + "/"
-    ignore = ",".join(['"{}"'.format(p[len(prefix):]) for p in ctx.attrs.meta.get(LuaMetaInfo).provided if p.startswith(prefix)]) if ctx.attrs.meta.get(LuaMetaInfo) else ""
+    minfo = ctx.attrs.meta.get(LuaMetaInfo) if ctx.attrs.meta != None else None
+    ignore = ",".join(['"{}"'.format(p[len(prefix):]) for p in minfo.provided if p.startswith(prefix)]) if minfo else ""
+    if ctx.attrs.luarc != None:
+        # your own .luarc.json, used as it is: relative paths in it are yours to resolve (LuaLS reads them against the checked dir)
+        cmd = cmd_args(
+            "sh", "-c", 'out=$("$@" 2>&1); echo "$out"; echo "$out" | grep -q "no problems found"', "--",
+            tool.run, "--check", ctx.attrs.path, "--configpath", ctx.attrs.luarc, "--checklevel", ctx.attrs.level.capitalize(),
+            hidden = ([outdir] if outdir != None else []) + tool.inputs + ctx.attrs.srcs,
+        )
+        return [DefaultInfo(), RunInfo(args = cmd), _test_info(cmd, ctx)]
     # LuaLS resolves relative library paths against the checked dir, so the luarc is rewritten to absolute paths
     # at run time (the action runs from the project root). LuaLS exits 0 even with diagnostics; the sentence is the verdict.
     cmd = cmd_args(
@@ -397,7 +416,8 @@ def _lua_typecheck_impl(ctx):
 lua_typecheck = rule(
     impl = _lua_typecheck_impl,
     attrs = dict({
-        "meta": attrs.dep(doc = "a lua_meta target (or a lua_library[meta]): the dir holding stubs and .luarc.json"),
+        "meta": attrs.option(attrs.dep(), default = None, doc = "a lua_meta target (or a lua_library[meta]): the dir holding stubs and a generated .luarc.json"),
+        "luarc": attrs.option(attrs.source(), default = None, doc = "your own .luarc.json; used verbatim instead of the generated one"),
         "path": attrs.string(doc = "project-relative dir LuaLS checks"),
         "srcs": attrs.list(attrs.source(), default = [], doc = "the files under path, so a change re-runs the check (glob them)"),
         "level": attrs.enum(["error", "warning", "information"], default = "warning"),
@@ -461,13 +481,16 @@ def _lua_feature_test_impl(ctx):
     if ctx.attrs.runner != None or ctx.attrs.runner_cmd:
         # someone else's runner: <runner> --steps <file> <feature>..., from the project root, with the module path in the environment
         head = ctx.attrs.runner[RunInfo].args if ctx.attrs.runner != None else cmd_args(ctx.attrs.runner_cmd)
-        cmd = cmd_args(head, "--steps", ctx.attrs.steps, ctx.attrs.features, hidden = [r for i in infos for r in i.roots])
+        # the verdict is the exit code; a "# N passed, M failed, K undefined" line and MONO_REPORT_OUT are conventions for people and apps, nothing here reads them
+        cmd = cmd_args(head, (["--steps", ctx.attrs.steps] if ctx.attrs.steps != None else []), ctx.attrs.features, hidden = [r for i in infos for r in i.roots])
         env = dict(ctx.attrs.env)
         env.update(_lua_path_env(infos))
         return [DefaultInfo(), RunInfo(args = cmd), ExternalRunnerTestInfo(
             type = "custom", command = [cmd] + ctx.attrs.args, env = env, labels = ctx.attrs.labels,
             run_from_project_root = True, use_project_relative_paths = True)]
     stdlib = ctx.attrs._stdlib[DefaultInfo].default_outputs[0]
+    if ctx.attrs.steps == None:
+        fail("lua_feature_test: steps is required unless you pass runner or runner_cmd")
     script, inputs = _wrapper(ctx, tc, "features", ctx.attrs._runner, infos, ["--steps", ctx.attrs.steps] + ctx.attrs.features)
     cmd = cmd_args(script, hidden = inputs + [stdlib])
     return _run_providers(script, inputs) + [_test_info(cmd, ctx)]
@@ -476,7 +499,7 @@ lua_feature_test = rule(
     impl = _lua_feature_test_impl,
     attrs = dict({
         "features": attrs.list(attrs.source(), doc = "Gherkin .feature files"),
-        "steps": attrs.source(doc = "the step definitions: a Lua file using require('mono.steps'), or whatever your runner reads"),
+        "steps": attrs.option(attrs.source(), default = None, doc = "step definitions: a Lua file using require('mono.steps'); optional with your own runner, which then gets only the features"),
         "runner": attrs.option(attrs.dep(providers = [RunInfo]), default = None, doc = "your own runner target; monomono's is not used"),
         "runner_cmd": attrs.list(attrs.string(), default = [], doc = "your own runner as a host command"),
         "deps": _DEPS,

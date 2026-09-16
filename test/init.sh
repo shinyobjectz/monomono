@@ -35,6 +35,12 @@ echo "bash + awk + lua only"
 step "recipes"
 just --list >/dev/null
 just mono status
+printf '\n# a consumer recipe shadows the package one of the same name\ndoctor:\n    @echo "my doctor"\n' >> justfile
+[[ "$(just doctor)" == "my doctor" ]]
+sed -i.bak '/^# a consumer recipe shadows/,$d' justfile && rm justfile.bak
+grep -qx '/.luarc.json' .gitignore && grep -qx '/.buckconfig.local' .gitignore
+mkdir -p library && printf '{}\n' > library/.luarc.json && ! git check-ignore -q library/.luarc.json && rm library/.luarc.json
+echo "allow-duplicate-recipes: your recipe wins; ignores are anchored, a committed library/.luarc.json survives"
 
 step "doctor"
 just doctor
@@ -121,6 +127,27 @@ grep -q '^ok 3 - resource is readable' <<<"$out"
 grep -q '# 4 passed, 0 failed' <<<"$out"
 echo "TAP + resources ok"
 
+step "lua: module prefix (a per-flow BUCK keeps its namespace) + a feature test with your own runner"
+mkdir -p library/hourly-check
+cat > library/hourly-check/BUCK <<'BUCK'
+load("@monomono//rules/lua:defs.bzl", "lua_library", "lua_test", "lua_feature_test")
+lua_library(name = "hourly-check", srcs = ["compare.lua"], prefix = "hourly-check", visibility = ["PUBLIC"])
+lua_test(name = "test", src = "test_compare.lua", deps = [":hourly-check"])
+lua_feature_test(name = "own-runner", features = ["flow.feature"], runner_cmd = ["bash", "library/hourly-check/runner.sh"], deps = [":hourly-check"])
+BUCK
+printf 'return { same = function(a, b) return a == b end }\n' > library/hourly-check/compare.lua
+printf 'assert(require("hourly-check.compare").same(1, 1))\nassert(package.loaded["compare"] == nil)\nprint("prefixed module ok")\n' > library/hourly-check/test_compare.lua
+printf 'Feature: flow\n  Scenario: compares\n    Then it compares\n' > library/hourly-check/flow.feature
+cat > library/hourly-check/runner.sh <<'SH'
+#!/usr/bin/env bash
+# a consumer's own runner: gets only the feature files; LUA_PATH carries the deps; the exit code is the verdict
+[[ $1 == *.feature ]] || { echo "expected a feature file first, got: $*" >&2; exit 1; }
+[[ $LUA_PATH == *hourly-check* ]] || { echo "LUA_PATH lacks the deps" >&2; exit 1; }
+echo "own runner ran $# feature(s)"
+SH
+just test //library/hourly-check:test //library/hourly-check:own-runner
+echo "prefix = 'hourly-check' makes compare.lua require-able as hourly-check.compare; own runner needs no steps"
+
 step "lua: compile check is part of the build"
 printf 'local x = = 1\n' > library/greet/util/broken.lua
 sed -i.bak 's/"util\/init.lua"\]/"util\/init.lua", "util\/broken.lua"]/' library/greet/BUCK
@@ -136,6 +163,15 @@ grep -q '^function M.hello(n) end' .lua-meta/greet.lua && grep -q '@param n stri
 just lua meta //library/greet:meta-provided
 grep -q '@field version string' .lua-meta/greet.lua
 echo "stubs generated and provided stubs win"
+mkdir -p library/fnmod
+cat > library/fnmod/BUCK <<'BUCK'
+load("@monomono//rules/lua:defs.bzl", "lua_library")
+lua_library(name = "fnmod", srcs = ["fnmod.lua"], visibility = ["PUBLIC"])
+BUCK
+printf -- '--- A module that is a function.\n---@param n number\n---@return number\nreturn function(n)\n  return n * 2\nend\n' > library/fnmod/fnmod.lua
+just lua meta //library/fnmod:fnmod >/dev/null
+grep -q '^return function(n) end' .lua-meta/fnmod.lua && grep -q '@param n number' .lua-meta/fnmod.lua && ! grep -q 'local M' .lua-meta/fnmod.lua
+echo "return function(...) modules stub as an annotated function, not a table"
 
 step "lua: typecheck (lua-language-server)"
 if ! skip luals; then
@@ -146,6 +182,14 @@ if ! skip luals; then
     if just test //library/greet:types >/dev/null 2>&1; then echo "expected the typecheck to fail" >&2; exit 1; fi
     rm library/greet/bad.lua
     echo "typecheck passes clean code and fails g.hello(1) against the stub"
+    cat > library/greet/.luarc.json <<'JSON'
+{ "runtime.version": "Lua 5.4", "workspace.library": ["meta"], "workspace.ignoreDir": ["meta"], "workspace.checkThirdParty": false, "diagnostics.globals": ["arg"] }
+JSON
+    cat >> library/greet/BUCK <<'BUCK'
+lua_typecheck(name = "types-own", luarc = ".luarc.json", path = "library/greet", srcs = glob(["**/*.lua"]))
+BUCK
+    just test //library/greet:types-own
+    echo "lua_typecheck(luarc = ...) uses the library's own .luarc.json verbatim"
   else
     echo "   (lua-language-server not on PATH; typecheck not exercised)"
   fi
@@ -361,11 +405,33 @@ just test //context/projects/demo-app/features/hello:hello-gherkin
 out=$(just run //context/projects/demo-app/features/hello:hello-gherkin 2>&1 | quiet)
 grep -q '# 3 passed, 0 failed, 0 undefined' <<<"$out"
 out=$(just lua trace //context/projects/demo-app/features/hello:hello-gherkin 2>&1)
-grep -q 'malleable.scenario' <<<"$out"
+grep -q 'monomono.scenario' <<<"$out"
 grep -q 'monomono.step' <<<"$out"
 test -f trace.json
 grep -q '"resourceSpans"' trace.json
-grep -q '"malleable.outcome"' trace.json
+grep -q '"monomono.outcome"' trace.json && ! grep -q 'malleable' trace.json
+cat > library/greet/profile.lua <<'LUA'
+-- a consumer's telemetry profile: its own collector's names (here, an agent harness's) replace monomono's
+return {
+  version = 1,
+  minted = {
+    ["malleable.outcome"] = { "passed", "failed", "undefined", "broken", "skipped" },
+    ["malleable.undefined"] = "number",
+    ["malleable.unclosed"] = "boolean",
+  },
+  names = {
+    scenario = "malleable.scenario",
+    outcome = "malleable.outcome",
+    undefined = "malleable.undefined",
+    unclosed = "malleable.unclosed",
+  },
+}
+LUA
+sed -i.bak 's/srcs = \["greet.lua", "util\/init.lua"\]/srcs = ["greet.lua", "util\/init.lua", "profile.lua"]/' library/greet/BUCK && rm library/greet/BUCK.bak
+MONO_TELEMETRY_PROFILE=profile MONO_TRACE_OUT="$work/profiled.json" buck2 run //context/projects/demo-app/features/hello:hello-gherkin >/dev/null 2>&1
+grep -q '"malleable.scenario ' "$work/profiled.json" && grep -q '"malleable.outcome"' "$work/profiled.json" && ! grep -q 'monomono.scenario' "$work/profiled.json"
+just lua fmt //library/greet:fmt >/dev/null
+echo "default names are monomono.*; a consumer profile renames the join span and outcome for its own collector"
 grep -q '"gen_ai' trace.json || true
 out=$(just lua observe //context/projects/demo-app/features/hello:hello-gherkin 2>&1)
 grep -q 'Scenario: plain greeting' <<<"$out"
@@ -436,6 +502,12 @@ step "update path (same ref, exercises migrate + sync)"
 git -C packages/monomono checkout -q "$ref"
 just mono migrate
 just mono status
+printf '\n# a consumer recipe shadows the package one of the same name\ndoctor:\n    @echo "my doctor"\n' >> justfile
+[[ "$(just doctor)" == "my doctor" ]]
+sed -i.bak '/^# a consumer recipe shadows/,$d' justfile && rm justfile.bak
+grep -qx '/.luarc.json' .gitignore && grep -qx '/.buckconfig.local' .gitignore
+mkdir -p library && printf '{}\n' > library/.luarc.json && ! git check-ignore -q library/.luarc.json && rm library/.luarc.json
+echo "allow-duplicate-recipes: your recipe wins; ignores are anchored, a committed library/.luarc.json survives"
 
 step "provider mode: an app that ships the package refuses just mono update"
 cp mono.toml "$work/mono.toml.bak"
@@ -465,7 +537,7 @@ exec "$lua_bin" "\$main" "\$@"
 SH
 chmod +x app-host.sh
 just toolchain add lua-host
-printf '[lua]\n  host = %s/app-host.sh\n' "$work/host demo" > .buckconfig.local
+printf '[lua]\n  host = %s/app-host.sh\n  bin = %s\n' "$work/host demo" "$lua_bin" > .buckconfig.local   # both set: host wins for tests, bin serves bundle/meta
 mkdir -p library/x
 cat > library/x/BUCK <<'BUCK'
 load("@monomono//rules/lua:defs.bzl", "lua_library", "lua_test")
@@ -478,11 +550,48 @@ just test //library/x:test
 expect "ran .* inside the app runtime" just run //library/x:test
 expect "ok=" just doctor
 echo "tests run through the host command; doctor does not demand make/cc"
+mkdir -p scripts/hooks && printf 'print("lua hook ran")\n' > scripts/hooks/pre-build.lua
+expect "ran .* inside the app runtime" just build
+rm scripts/hooks/pre-build.lua
+just context project new p >/dev/null && just context feature new p f >/dev/null
+expect "step skeleton" just context feature test p f --steps
+echo "under lua-host the .lua hook and the --steps writer run through the host command"
 sed -i.bak '/# monomono:toolchain lua-host/,$d' toolchains/BUCK && rm toolchains/BUCK.bak
 just toolchain add lua-config
 printf '[lua]\n  bin = %s\n' "$lua_bin" > .buckconfig.local
 just test //library/x:test
 echo "lua-config points toolchains//:lua at a configured interpreter"
+printf 'print("config tool says " .. arg[1])\n' > scripts/tools/cfg.lua
+[[ "$(just tool cfg hi 2>/dev/null | tail -n 1)" == "config tool says hi" ]]
+echo "under lua-config the .lua backends run through [lua] bin"
+
+# --- a third consumer: vendored (the package is a sibling cell, no submodule), no context module, no python on PATH
+
+step "vendored sibling cell, --no-context, and a PATH without python"
+mkdir -p "$work/vend" "$work/nopy"
+for d in $(tr ':' ' ' <<<"$PATH"); do
+  for f in "$d"/*; do
+    n=$(basename "$f"); case "$n" in python*|pip*) continue ;; esac
+    [[ -x $f && ! -e "$work/nopy/$n" ]] && ln -s "$f" "$work/nopy/$n"
+  done
+done 2>/dev/null
+! command -v python3 >/dev/null 2>&1 || [[ ! -e "$work/nopy/python3" ]]
+git -C "$work/vend" init -q
+git -C "$work/vend" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+MONO_REPO_URL="$here" "$here/bin/monomono" init "$work/vend" --ref "$ref" --name vend --vendor --no-context --provider selftest
+cd "$work/vend"
+test ! -d packages/monomono/.git
+grep -q 'context = "false"' mono.toml
+just toolchain add lua >/dev/null
+mkdir -p library/v
+printf 'load("@monomono//rules/lua:defs.bzl", "lua_library", "lua_test")\nlua_library(name = "v", srcs = ["v.lua"])\nlua_test(name = "test", src = "t.lua", deps = [":v"])\n' > library/v/BUCK
+printf 'return { one = 1 }\n' > library/v/v.lua
+printf 'assert(require("v").one == 1)\n' > library/v/t.lua
+out=$(PATH="$work/nopy" just doctor 2>&1) || { echo "$out"; exit 1; }
+! grep -q 'sqlite3' <<<"$out"
+grep -q 'vendored by selftest' <<<"$out"
+PATH="$work/nopy" just check
+echo "vendored @monomono cell loads from packages/monomono with no .git; no sqlite3 asked for; just check green with no python on PATH"
 
 echo
 echo "selftest ok"

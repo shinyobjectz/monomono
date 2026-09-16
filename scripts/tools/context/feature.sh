@@ -158,12 +158,8 @@ cmd_steps() {
   dir=$(feature_dir "$project" "$slug")
   is_feature "$dir" || die "unknown feature: $project/$slug"
   local dest="$dir/test/steps.lua"
-  local lua lib
-  lua=$(buck2_out "toolchains//:lua-build[lua]")
-  lib=$(buck2_out "monomono//rules/lua:lib")
-  [[ -n $lua && -n $lib ]] || die "toolchains//:lua is not declared (just toolchain add lua)"
   local skel
-  skel=$(cd "$MONO_ROOT" && LUA_PATH="$lib/lib/?.lua;$lib/lib/?/init.lua;;" "$MONO_ROOT/$lua" "$MONO_HOME/rules/lua/skeletons.lua" "$([[ -f $dest ]] && echo "$dest")" "$dir"/bdd/*.feature)
+  skel=$(cd "$MONO_ROOT" && bash -c 'source "$1/scripts/lib.sh"; shift; lua_run "$@"' _ "$MONO_HOME" "$MONO_HOME/rules/lua/skeletons.lua" "$([[ -f $dest ]] && echo "$dest")" "$dir"/bdd/*.feature)
   if [[ ! -f $dest ]]; then
     printf -- '-- Step definitions for %s. Placeholders: {int} {float} {word} {string} {value}. ctx is per scenario.\nlocal steps = require("mono.steps")\n\n' "$(rel "$dir")/bdd" >"$dest"
   fi

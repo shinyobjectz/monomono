@@ -50,6 +50,7 @@ Lua
   just context feature test <p> <s> --steps     # bind bdd/*.feature in test/steps.lua -> <s>-gherkin target
   just lua repl | cover | profile | meta | fmt   # dev loop over the graph
   just lua trace | observe <feature target>     # span tree + OTLP trace.json; trace read back as Gherkin
+  MONO_TELEMETRY_PROFILE=<module>               # your collector's span and attribute names
   just tool <name>                              # scripts/tools/<name>.sh or .lua
   scripts/hooks/pre-build.{sh,lua}              # runs before just build
 

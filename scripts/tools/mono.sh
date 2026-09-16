@@ -33,13 +33,14 @@ scaffold() {
 }
 
 cmd_init() {
-  local mode="submodule" repo="$MONO_REPO_URL" name="" provider=""
+  local mode="submodule" repo="$MONO_REPO_URL" name="" provider="" context="true"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --mode) mode=$2; shift 2 ;;
       --repo) repo=$2; shift 2 ;;
       --name) name=$2; shift 2 ;;
       --provider) provider=$2; shift 2 ;;
+      --no-context) context="false"; shift ;;
       *) usage ;;
     esac
   done
@@ -51,6 +52,7 @@ cmd_init() {
   toml_set monomono path "$(rel "$MONO_HOME")"
   toml_set monomono repo "$repo"
   [[ -z $provider ]] || toml_set monomono provider "$provider"
+  [[ $context == true ]] || toml_set modules context "$context"
   toml_set repo name "$name"
   cmd_sync
   echo

@@ -24,7 +24,7 @@ def mono_feature_tests(name, tests, features = None, steps = None, deps = None, 
     """A feature's test targets plus a test_suite named `name`.
     .sh files run as shell checks; .lua files run under toolchains//:lua with `deps` on LUA_PATH;
     when `steps` names a steps file, every .feature in `features` runs as Gherkin scenarios
-    and the run is traced as malleable-compatible spans (MONO_TRACE_OUT=file for OTLP JSON)."""
+    and the run is traced as spans (MONO_TRACE_OUT=file for OTLP JSON; MONO_TELEMETRY_PROFILE names them)."""
     targets = []
     tags = (labels or []) + ["feature:" + name]
     for t in tests:

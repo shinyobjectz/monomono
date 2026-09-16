@@ -2,6 +2,7 @@
 # Recipe bodies call scripts/build, scripts/tools, or scripts/update. A script is <name>.sh or <name>.lua. No logic here.
 
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+set allow-duplicate-recipes   # your recipe below wins over the package's of the same name
 
 import 'packages/monomono/mono.just'
 

@@ -83,7 +83,7 @@ The prelude has no Lua rules, so monomono ships them. `just toolchain add lua` d
 `@monomono//rules/lua:defs.bzl` gives every `.lua` file a place in the graph:
 
 ```
-lua_library(name, srcs, deps, root, cpath, resources)   modules on LUA_PATH, C modules on LUA_CPATH, data via require("mono.resource"); luac -p on every build
+lua_library(name, srcs, deps, root, prefix, cpath, resources)   modules on LUA_PATH (prefix keeps a per-folder BUCK's namespace), C modules on LUA_CPATH, resources; luac -p on every build
 lua_binary(name, main, deps)                           just run //app/x -- args
 lua_test(name, src, deps) / lua_tests(name, srcs)       require("mono.spec") for named cases and TAP output
 lua_repl(name, deps)                                   an interpreter with those libraries on the path
@@ -91,17 +91,19 @@ lua_bundle(name, main, deps, dialect, bytecode)        one file, package.preload
 lua_embed(name, src, lang, symbol)                     the bundle as a C header or Rust source
 lua_wasm(name, src)                                    the bundle as an ES module for wasmoon in the browser
 lua_meta(name, deps, provided)                         LuaLS ---@meta stubs + .luarc.json; hand-written stubs win
-lua_typecheck(name, meta, path, srcs)                  lua-language-server --check as a test (toolchains//:luals)
+lua_typecheck(name, meta | luarc, path, srcs)           lua-language-server --check as a test (toolchains//:luals); your own .luarc.json is used verbatim
 lua_lint(name, srcs) / lua_format(name, srcs)          luacheck and stylua --check as tests; [fix] rewrites
-lua_feature_test(name, features, steps, runner)        Gherkin scenarios against a steps file, or your own runner
+lua_feature_test(name, features, steps, runner)        Gherkin scenarios against a steps file, or your own runner (then steps is optional; the exit code is the verdict)
 lua_cxx_library(name)                                  the interpreter as a C library for a host that embeds it
 ```
 
-`just lua` is the dev loop over the same graph: `repl`, `run`, `cover` (lcov-style `coverage.txt`), `profile`, `meta` (writes `.luarc.json` and `.lua-meta/` for the editor), `fmt`, `trace`, `observe`, `script`. Scripts under `scripts/{build,tools,update}/<name>.lua` are just backends like their `.sh` neighbours, run under the hermetic interpreter with `scripts/lib/` and the `mono` stdlib on the path; `scripts/hooks/pre-build.{sh,lua}` runs before every `just build`.
+`just lua` is the dev loop over the same graph: `repl`, `run`, `cover` (lcov-style `coverage.txt`), `profile`, `meta` (writes `.luarc.json` and `.lua-meta/` for the editor), `fmt`, `trace`, `observe`, `script`. Scripts under `scripts/{build,tools,update}/<name>.lua` are just backends like their `.sh` neighbours, with `scripts/lib/` and the `mono` stdlib on the path; `scripts/hooks/pre-build.{sh,lua}` runs before every `just build`. Whatever declared `toolchains//:lua` runs them: the hermetic build, `[lua] bin`, or under `lua-host` the host command (which wins over `bin` for tests, hooks and scripts; `bin` still serves bundle, meta and the compile check). `cover` and `profile` need an interpreter.
 
 ### Gherkin and telemetry
 
-`just context feature test <project> <slug> --steps` binds `bdd/*.feature` in `test/steps.lua` (`require("mono.steps")` with `{string}`, `{int}`, `{float}`, `{word}`, `{value}` placeholders) and the feature BUCK gets a `<slug>-gherkin` target. The runner prints TAP, counts undefined sentences instead of passing them, and records every feature, scenario and step as a span in the [malleable](https://github.com/shinyobjectz/malleable) shape (`monomono.feature` → `malleable.scenario` → `monomono.step`, with `malleable.outcome`). `just lua trace` prints the tree and writes OTLP JSON to `trace.json`; `just lua observe` reads a trace back as Gherkin; `MONO_REPORT_OUT` writes one JSON row per scenario for an app to ingest. `require("mono.telemetry")` is the same recorder for application code, so an app’s own spans and its feature runs land in one trace.
+`just context feature test <project> <slug> --steps` binds `bdd/*.feature` in `test/steps.lua` (`require("mono.steps")` with `{string}`, `{int}`, `{float}`, `{word}`, `{value}` placeholders) and the feature BUCK gets a `<slug>-gherkin` target. The runner prints TAP, counts undefined sentences instead of passing them, and records every feature, scenario and step as a span (`monomono.feature` → `monomono.scenario` → `monomono.step`, with `monomono.outcome`). `just lua trace` prints the tree and writes OTLP JSON to `trace.json`; `just lua observe` reads a trace back as Gherkin; `MONO_REPORT_OUT` writes one JSON row per scenario for an app to ingest.
+
+The vocabulary is closed and yours: `MONO_TELEMETRY_PROFILE=<module>` (or `require("mono.telemetry").vocabulary(profile)` in a steps file) adds your collector's attribute names and renames the join spans, so an app's own spans and its feature runs land in one trace under the app's names, not this package's. `require("mono.telemetry")` is the same recorder for application code.
 
 ### Hosts
 

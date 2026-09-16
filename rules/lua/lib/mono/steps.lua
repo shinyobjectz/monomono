@@ -1,4 +1,4 @@
---- Step definitions for Gherkin features, with malleable's expression placeholders:
+--- Step definitions for Gherkin features, with Cucumber-expression placeholders:
 ---   {int} {float} {word} {string} {value}
 ---   local steps = require("mono.steps")
 ---   steps.given("the budget is {int}", function(ctx, n) ctx.budget = n end)

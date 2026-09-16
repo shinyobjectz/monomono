@@ -22,6 +22,20 @@ end
 
 local function stub(name, src)
   local lines = { "---@meta", ("---@module '%s'"):format(name), "" }
+  -- `return function(...)` modules: the stub is the annotated function itself, not a table
+  local nsrc = "\n" .. src
+  local fparams = nsrc:match("\nreturn%s+function%s*%(([^)]*)%)%s*$") or nsrc:match("\nreturn%s+function%s*%(([^)]*)%)")
+  if fparams and not nsrc:match("\nreturn%s+[%a_][%w_]*%s*$") then
+    local before = nsrc:match("^(.-)\nreturn%s+function") or ""
+    local anns = {}
+    for line in (before .. "\n"):gmatch("(.-)\n") do
+      local ann = line:match("^%s*(%-%-%-.*)$")
+      if ann then anns[#anns + 1] = ann elseif line:match("%S") then anns = {} end
+    end
+    for _, a in ipairs(anns) do lines[#lines + 1] = a end
+    lines[#lines + 1] = ("return function(%s) end"):format(fparams)
+    return table.concat(lines, "\n") .. "\n"
+  end
   -- the local table the module returns, if it is the usual shape
   local var = src:match("local%s+([%a_][%w_]*)%s*=%s*{}") or src:match("return%s+([%a_][%w_]*)%s*$") or "M"
   lines[#lines + 1] = ("local %s = {}"):format(var)

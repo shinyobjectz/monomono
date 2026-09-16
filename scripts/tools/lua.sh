@@ -22,7 +22,7 @@ USAGE
   exit 2
 }
 
-interp() { buck2_out "toolchains//:lua-build[lua]"; }
+interp() { lua_bin; }
 stdlib_dir() { buck2_out "monomono//rules/lua:lib"; }
 
 verb=${1-}
@@ -30,8 +30,8 @@ shift || true
 case "$verb" in
   repl) [[ -n ${1-} ]] || usage; t=$1; shift; exec buck2 run "${t%%\[*}[repl]" -- "$@" ;;
   run) exec buck2 run "$@" ;;
-  cover) [[ -n ${1-} ]] || usage; t=$1; shift; MONO_LUA_HOOK=cover MONO_COVERAGE_OUT="${MONO_COVERAGE_OUT:-$MONO_ROOT/coverage.txt}" buck2 run "$t" -- "$@" ;;
-  profile) [[ -n ${1-} ]] || usage; t=$1; shift; MONO_LUA_HOOK=profile buck2 run "$t" -- "$@" ;;
+  cover) [[ -n ${1-} ]] || usage; [[ -n $(interp) ]] || die "cover needs an interpreter (lua, lua-config); under lua-host the host owns instrumentation"; t=$1; shift; MONO_LUA_HOOK=cover MONO_COVERAGE_OUT="${MONO_COVERAGE_OUT:-$MONO_ROOT/coverage.txt}" buck2 run "$t" -- "$@" ;;
+  profile) [[ -n ${1-} ]] || usage; [[ -n $(interp) ]] || die "profile needs an interpreter (lua, lua-config); under lua-host the host owns instrumentation"; t=$1; shift; MONO_LUA_HOOK=profile buck2 run "$t" -- "$@" ;;
   meta)
     [[ -n ${1-} ]] || usage
     t=$1
@@ -53,11 +53,9 @@ case "$verb" in
   observe) [[ -n ${1-} ]] || usage; MONO_OBSERVE=1 buck2 run "$1" 2>&1 | grep -vE '^\[20' ;;
   script)
     [[ -n ${1-} ]] || usage
-    lua=$(interp); lib=$(stdlib_dir)
-    [[ -n $lua && -n $lib ]] || die "toolchains//:lua is not declared (just toolchain add lua)"
-    export LUA_PATH="$MONO_ROOT/scripts/lib/?.lua;$MONO_ROOT/scripts/lib/?/init.lua;$lib/lib/?.lua;$lib/lib/?/init.lua;;"
-    exec "$lua" "$@"
+    f=$1; shift
+    lua_run "$f" "$@"
     ;;
-  version) "$(interp)" -v ;;
+  version) b=$(interp); [[ -n $b ]] && "$b" -v || echo "no interpreter; host = $(lua_host)" ;;
   *) usage ;;
 esac
