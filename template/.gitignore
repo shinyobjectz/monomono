@@ -1,0 +1,37 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Env and credentials — values live in your host's secret store, never in git
+.env
+.env.*
+.envrc
+*.pem
+*.key
+
+# buck2
+buck-out/
+
+# Logs and caches
+*.log
+.cache/
+
+# Ecosystem outputs (manifests live in packages/<eco>; outputs never leave there)
+packages/**/node_modules/
+packages/**/target/
+packages/**/_build/
+packages/**/deps/
+packages/**/.venv/
+
+# SQLite sidecars (the .sqlite store itself may be committed)
+*.wal
+*.shm
+*.sqlite-journal
+
+# Editors and leftover agent hosts
+.idea/
+.vscode/
+*.swp
+.cursor/
+.claude/
+.codex/

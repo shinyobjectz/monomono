@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Bootstrap. Attaches monomono to a repo as .mono and scaffolds the skeleton.
+#
+#   curl -fsSL https://raw.githubusercontent.com/content-jet/monomono/main/bin/monomono | bash -s -- init
+#   monomono init [dir] [--ref v0.1.0] [--repo <url>] [--vendor] [--name <repo-name>]
+#   monomono version
+#
+# After init, everything else is `just`. This file has no dependency on the rest of the package
+# so it can run before the package is present.
+
+set -euo pipefail
+
+REPO="${MONO_REPO_URL:-https://github.com/content-jet/monomono}"
+REF=""
+MODE="submodule"
+NAME=""
+TARGET=""
+
+usage() {
+  sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+latest_tag() {
+  git ls-remote --tags --refs "$1" 2>/dev/null | awk -F/ '{print $NF}' | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1
+}
+
+cmd_init() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --ref) REF=$2; shift 2 ;;
+      --repo) REPO=$2; shift 2 ;;
+      --vendor) MODE="vendor"; shift ;;
+      --name) NAME=$2; shift 2 ;;
+      -h|--help) usage ;;
+      -*) echo "unknown flag: $1" >&2; usage ;;
+      *) TARGET=$1; shift ;;
+    esac
+  done
+  TARGET=${TARGET:-.}
+  mkdir -p "$TARGET"
+  TARGET=$(cd "$TARGET" && pwd)
+  command -v git >/dev/null 2>&1 || { echo "git is required" >&2; exit 1; }
+
+  if [[ ! -d $TARGET/.git ]]; then
+    git -C "$TARGET" init -q
+    echo "initialized git repo at $TARGET"
+  fi
+
+  if [[ -f $TARGET/.mono/VERSION ]]; then
+    echo ".mono already present ($(cat "$TARGET/.mono/VERSION")); running scaffold only"
+  else
+    [[ -n $REF ]] || REF=$(latest_tag "$REPO")
+    [[ -n $REF ]] || REF="main"
+    case "$MODE" in
+      submodule)
+        git -C "$TARGET" -c protocol.file.allow=always submodule add --name monomono "$REPO" .mono
+        git -C "$TARGET/.mono" fetch -q --tags origin
+        git -C "$TARGET/.mono" checkout -q "$REF"
+        ;;
+      vendor)
+        git -c protocol.file.allow=always clone -q --depth 1 --branch "$REF" "$REPO" "$TARGET/.mono"
+        rm -rf "$TARGET/.mono/.git"
+        ;;
+    esac
+    echo "attached monomono $REF as .mono ($MODE)"
+  fi
+
+  MONO_HOME="$TARGET/.mono" MONO_ROOT="$TARGET" \
+    "$TARGET/.mono/scripts/tools/mono.sh" init --mode "$MODE" --repo "$REPO" ${NAME:+--name "$NAME"}
+}
+
+case "${1:-}" in
+  init) shift; cmd_init "$@" ;;
+  version)
+    here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    [[ -f $here/VERSION ]] && cat "$here/VERSION" || echo "remote"
+    ;;
+  *) usage ;;
+esac

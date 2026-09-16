@@ -1,0 +1,7 @@
+# Root targets. Areas own their own BUCK files; this one only wires repo-wide checks.
+load("@monomono//rules:defs.bzl", "mono_check")
+
+mono_check(
+    name = "doctor",
+    test = "git/ci/local/doctor.sh",
+)

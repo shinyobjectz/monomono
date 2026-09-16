@@ -1,0 +1,20 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+# Secrets come from the host's secret store. Map them as NAME: ${{ secrets.NAME }} here.
+# Never load a committed env file.
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: extractions/setup-just@v2
+      - run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: just setup
+      - run: ./git/ci/local/check.sh

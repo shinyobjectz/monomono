@@ -1,0 +1,12 @@
+# monomono manifest. `just mono update` rewrites [monomono]; the rest is yours.
+
+[monomono]
+version = "0.0.0"
+mode = "submodule"
+repo = "https://github.com/content-jet/monomono"
+
+[repo]
+name = "__NAME__"
+
+[modules]
+context = "true"

@@ -1,0 +1,21 @@
+# __NAME__ — enter the repo through just. Package recipes come from .mono; add yours below.
+# Recipe bodies call scripts/build, scripts/tools, or scripts/update. No logic here.
+
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+import '.mono/mono.just'
+
+# scripts/build/<target>.sh (for steps buck2 cannot own yet)
+[positional-arguments]
+build-script target *args:
+    ./scripts/build/"$1".sh "${@:2}"
+
+# scripts/tools/<name>.sh
+[positional-arguments]
+tool name *args:
+    ./scripts/tools/"$1".sh "${@:2}"
+
+# scripts/update/<target>.sh
+[positional-arguments]
+update target *args:
+    ./scripts/update/"$1".sh "${@:2}"

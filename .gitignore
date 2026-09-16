@@ -1,0 +1,12 @@
+.DS_Store
+buck-out/
+*.log
+.env
+.env.*
+*.wal
+*.shm
+.cursor/
+.claude/
+.codex/
+.idea/
+.vscode/

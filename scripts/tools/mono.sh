@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+# The package itself: scaffold, status, update, migrate, sync.
+
+source "$(cd "$(dirname "$0")/.." && pwd)/lib.sh"
+
+usage() {
+  cat >&2 <<'USAGE'
+usage:
+  just mono status              # version pinned, version installed, mode, modules
+  just mono version             # installed package version
+  just mono update [ref]        # move .mono to <ref> (default: latest tag), migrate, sync
+  just mono migrate             # run migrations from mono.toml version to .mono/VERSION
+  just mono sync                # relink hosts, regenerate skills, copy ci, add new template files
+  just mono diff                # template files the repo does not have yet
+USAGE
+  exit 2
+}
+
+# Copy template files that do not exist yet. Never overwrite.
+scaffold() {
+  local name=$1 src dest rel added=0
+  while IFS= read -r src; do
+    rel=${src#"$MONO_TEMPLATE"/}
+    dest="$MONO_ROOT/$rel"
+    [[ -e $dest || -L $dest ]] && continue
+    mkdir -p "$(dirname "$dest")"
+    sed "s/__NAME__/$name/g" "$src" >"$dest"
+    [[ -x $src ]] && chmod +x "$dest"
+    echo "added   $rel"
+    added=$((added + 1))
+  done < <(find "$MONO_TEMPLATE" -type f | sort)
+  echo "scaffold: $added file(s) added"
+}
+
+cmd_init() {
+  local mode="submodule" repo="$MONO_REPO_URL" name=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --mode) mode=$2; shift 2 ;;
+      --repo) repo=$2; shift 2 ;;
+      --name) name=$2; shift 2 ;;
+      *) usage ;;
+    esac
+  done
+  [[ -n $name ]] || name=$(basename "$MONO_ROOT")
+  name=$(kebab "$name")
+  scaffold "$name"
+  toml_set monomono version "$MONO_VERSION"
+  toml_set monomono mode "$mode"
+  toml_set monomono repo "$repo"
+  toml_set repo name "$name"
+  cmd_sync
+  echo
+  echo "monomono $MONO_VERSION is attached. Next:"
+  echo "  just setup      # buck2, hosts, stores"
+  echo "  just doctor"
+  echo "  just check"
+}
+
+cmd_status() {
+  local pinned mode
+  pinned=$(toml_get monomono version || true)
+  mode=$(toml_get monomono mode || true)
+  echo "package     $(rel "$MONO_HOME")"
+  echo "installed   $MONO_VERSION"
+  echo "manifest    ${pinned:-none}"
+  echo "mode        ${mode:-unknown}"
+  echo "repo        $(mono_repo_name)"
+  if [[ -d $MONO_HOME/.git || -f $MONO_HOME/.git ]]; then
+    echo "git         $(git -C "$MONO_HOME" describe --tags --always 2>/dev/null)"
+  fi
+  echo "modules"
+  awk '/^\[modules\]/ { on = 1; next } /^\[/ { on = 0 } on && NF { print "  " $0 }' "$MONO_MANIFEST" 2>/dev/null || true
+  if [[ -n $pinned && $pinned != "$MONO_VERSION" ]]; then
+    echo
+    echo "manifest says $pinned but .mono is $MONO_VERSION; run just mono migrate"
+  fi
+}
+
+run_migrations() {
+  local from=$1 to=$2 file ver ran=0
+  for file in "$MONO_HOME"/migrations/*.sh; do
+    [[ -f $file ]] || continue
+    ver=$(basename "$file" .sh)
+    if version_lt "$from" "$ver" && ! version_lt "$to" "$ver"; then
+      echo "migrate $ver"
+      MONO_FROM="$from" MONO_TO="$to" bash "$file"
+      ran=$((ran + 1))
+    fi
+  done
+  echo "migrations run: $ran ($from -> $to)"
+}
+
+cmd_migrate() {
+  local from
+  from=$(toml_get monomono version || true)
+  [[ -n $from ]] || from="0.0.0"
+  run_migrations "$from" "$MONO_VERSION"
+  toml_set monomono version "$MONO_VERSION"
+}
+
+cmd_update() {
+  local ref=${1-} mode from repo
+  mode=$(toml_get monomono mode || true)
+  repo=$(toml_get monomono repo || true)
+  [[ -n $repo ]] || repo=$MONO_REPO_URL
+  from=$(toml_get monomono version || true)
+  [[ -n $from ]] || from="0.0.0"
+  case "${mode:-submodule}" in
+    submodule)
+      git -C "$MONO_HOME" fetch -q --tags origin
+      [[ -n $ref ]] || ref=$(git -C "$MONO_HOME" tag --list 'v*' --sort=-v:refname | head -n 1)
+      [[ -n $ref ]] || die "no release tags found in $repo"
+      git -C "$MONO_HOME" checkout -q "$ref"
+      ;;
+    vendor)
+      [[ -n $ref ]] || ref=$(git ls-remote --tags --refs "$repo" | awk -F/ '{print $NF}' | sort -V | tail -n 1)
+      [[ -n $ref ]] || die "no release tags found in $repo"
+      local tmp
+      tmp=$(mktemp -d)
+      git clone -q --depth 1 --branch "$ref" "$repo" "$tmp/mono"
+      rm -rf "$tmp/mono/.git"
+      rm -rf "$MONO_HOME"
+      mv "$tmp/mono" "$MONO_HOME"
+      rm -rf "$tmp"
+      ;;
+    *) die "unknown mode in mono.toml: $mode" ;;
+  esac
+  MONO_VERSION=$(tr -d '[:space:]' <"$MONO_HOME/VERSION")
+  echo "monomono $from -> $MONO_VERSION ($ref)"
+  run_migrations "$from" "$MONO_VERSION"
+  toml_set monomono version "$MONO_VERSION"
+  scaffold "$(mono_repo_name)"
+  cmd_sync
+  if in_git_repo; then
+    git -C "$MONO_ROOT" add mono.toml .mono 2>/dev/null || true
+    echo "staged mono.toml and .mono; commit when ready"
+  fi
+}
+
+cmd_sync() {
+  "$MONO_HOME/scripts/tools/agents-host.sh" sync
+  if [[ -d $MONO_CI/github ]]; then
+    "$MONO_HOME/scripts/tools/ci.sh" sync
+  fi
+}
+
+cmd_diff() {
+  local src rel missing=0
+  while IFS= read -r src; do
+    rel=${src#"$MONO_TEMPLATE"/}
+    if [[ ! -e $MONO_ROOT/$rel ]]; then
+      echo "missing  $rel"
+      missing=$((missing + 1))
+    fi
+  done < <(find "$MONO_TEMPLATE" -type f | sort)
+  echo "$missing template file(s) not in repo (just mono sync adds them)"
+}
+
+action=${1:-status}
+shift || true
+case "$action" in
+  init) cmd_init "$@" ;;
+  status) cmd_status ;;
+  version) echo "$MONO_VERSION" ;;
+  update) cmd_update "$@" ;;
+  migrate) cmd_migrate ;;
+  sync) cmd_sync; scaffold "$(mono_repo_name)" ;;
+  diff) cmd_diff ;;
+  -h|--help) usage ;;
+  *) usage ;;
+esac
