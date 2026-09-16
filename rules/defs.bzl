@@ -14,14 +14,13 @@ def mono_script(name, main, resources = None, visibility = ["PUBLIC"], **kwargs)
     )
 
 def mono_check(name, test, args = None, env = None, labels = None, **kwargs):
-    """A shell check that runs from the repo root: `just test //path:name`."""
+    """A shell check that runs from the repo root (cwd = project root): `just test //path:name`."""
     native.sh_test(
         name = name,
         test = test,
         args = args or [],
         env = env or {},
-        labels = labels or [],
-        run_from_project_root = True,
+        labels = (labels or []) + ["buck2_run_from_project_root"],
         **kwargs
     )
 

@@ -7,7 +7,7 @@ Monorepo on [monomono](https://github.com/content-jet/monomono). Nested `AGENTS.
 - Enter the repo through `just`. Do not add parallel CLIs (`package.json` scripts, Makefiles, cargo aliases, command READMEs).
 - Keep the justfile a thin router. Package recipes come from `.mono/mono.just`. Your recipes call `scripts/build`, `scripts/tools`, or `scripts/update`. No business logic in the justfile.
 - Buck2 is the build graph. Anything that turns sources into an artifact, and every test, is a target in a `BUCK` file. `just build`, `just test`, and `just run` are buck2. A shell script under `scripts/build` is a temporary bridge, not a home.
-- Toolchains are declared, never assumed. `toolchains/BUCK` starts with `genrule` and `python_bootstrap` only. Add one with `just toolchain add <name>`.
+- Toolchains are declared, never assumed. `toolchains/BUCK` starts with `genrule`, `python_bootstrap`, and the no-op `test` toolchain only. Add one with `just toolchain add <name>`.
 - Every third-party ecosystem lives under `packages/<eco>` behind an adapter. Manifests and lockfiles live there and nowhere else. `just pkg add <eco> <name>`.
 - Reusable code goes in `library/`. Deliverables go in `app/`. Apps depend on library targets; they do not reach into another area's files.
 - Do not write errant markdown. Allowed prose: `AGENTS.md`, Gherkin `.feature`, `feature.md`, `library.md`, `PROJECT.md`, and the root `README.md`. Everything else that is not code goes to `context/dump` via `just context put`.

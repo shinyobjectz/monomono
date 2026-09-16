@@ -1,6 +1,9 @@
 # Declared toolchains. Nothing is assumed: add one with `just toolchain add <name>`.
+# genrule + python_bootstrap let genrule run; test + remote_test_execution let *_test rules run. That is all.
+load("@prelude//tests:test_toolchain.bzl", "noop_test_toolchain")
 load("@prelude//toolchains:genrule.bzl", "system_genrule_toolchain")
 load("@prelude//toolchains:python.bzl", "system_python_bootstrap_toolchain")
+load("@prelude//toolchains:remote_test_execution.bzl", "remote_test_execution_toolchain")
 
 # monomono:toolchain genrule
 system_genrule_toolchain(
@@ -11,5 +14,15 @@ system_genrule_toolchain(
 # monomono:toolchain python-bootstrap
 system_python_bootstrap_toolchain(
     name = "python_bootstrap",
+    visibility = ["PUBLIC"],
+)
+
+# monomono:toolchain test
+noop_test_toolchain(
+    name = "test",
+    visibility = ["PUBLIC"],
+)
+remote_test_execution_toolchain(
+    name = "remote_test_execution",
     visibility = ["PUBLIC"],
 )
