@@ -8,8 +8,8 @@ usage() {
 usage:
   just mono status              # version pinned, version installed, mode, modules
   just mono version             # installed package version
-  just mono update [ref]        # move .mono to <ref> (default: latest tag), migrate, sync
-  just mono migrate             # run migrations from mono.toml version to .mono/VERSION
+  just mono update [ref]        # move packages/monomono to <ref> (default: latest tag), migrate, sync
+  just mono migrate             # run migrations from mono.toml version to packages/monomono/VERSION
   just mono sync                # relink hosts, regenerate skills, copy ci, add new template files
   just mono diff                # template files the repo does not have yet
 USAGE
@@ -47,6 +47,7 @@ cmd_init() {
   scaffold "$name"
   toml_set monomono version "$MONO_VERSION"
   toml_set monomono mode "$mode"
+  toml_set monomono path "$(rel "$MONO_HOME")"
   toml_set monomono repo "$repo"
   toml_set repo name "$name"
   cmd_sync
@@ -73,7 +74,7 @@ cmd_status() {
   awk '/^\[modules\]/ { on = 1; next } /^\[/ { on = 0 } on && NF { print "  " $0 }' "$MONO_MANIFEST" 2>/dev/null || true
   if [[ -n $pinned && $pinned != "$MONO_VERSION" ]]; then
     echo
-    echo "manifest says $pinned but .mono is $MONO_VERSION; run just mono migrate"
+    echo "manifest says $pinned but packages/monomono is $MONO_VERSION; run just mono migrate"
   fi
 }
 
@@ -129,12 +130,19 @@ cmd_update() {
   MONO_VERSION=$(tr -d '[:space:]' <"$MONO_HOME/VERSION")
   echo "monomono $from -> $MONO_VERSION ($ref)"
   run_migrations "$from" "$MONO_VERSION"
+  # a migration may relocate the package; follow mono.toml
+  local newpath
+  newpath=$(toml_get monomono path || true)
+  if [[ -n $newpath && -f $MONO_ROOT/$newpath/VERSION ]]; then
+    MONO_HOME="$MONO_ROOT/$newpath"
+    export MONO_HOME
+  fi
   toml_set monomono version "$MONO_VERSION"
   scaffold "$(mono_repo_name)"
   cmd_sync
   if in_git_repo; then
-    git -C "$MONO_ROOT" add mono.toml .mono 2>/dev/null || true
-    echo "staged mono.toml and .mono; commit when ready"
+    git -C "$MONO_ROOT" add mono.toml packages/monomono 2>/dev/null || true
+    echo "staged mono.toml and packages/monomono; commit when ready"
   fi
 }
 

@@ -45,7 +45,7 @@ cmd_list() {
   printf '%s\t%s\n' eco adapter
   local dir
   for dir in "$MONO_PACKAGES"/*/; do
-    [[ -d $dir ]] || continue
+    [[ -d $dir && $(basename "$dir") != monomono ]] || continue
     local eco name="none"
     eco=$(basename "$dir")
     [[ -x $dir/adapter.sh ]] && name="local"
@@ -75,7 +75,7 @@ cmd_init() {
 cmd_ensure() {
   local dir
   for dir in "$MONO_PACKAGES"/*/; do
-    [[ -d $dir ]] || continue
+    [[ -d $dir && $(basename "$dir") != monomono ]] || continue
     adapter_for "$(basename "$dir")" >/dev/null 2>&1 || continue
     run_adapter "$(basename "$dir")" ensure
   done
@@ -90,7 +90,7 @@ case "$action" in
   add|update) eco=${1-}; [[ -n $eco ]] || usage; shift; run_adapter "$eco" "$action" "$@" ;;
   sync)
     if [[ -n ${1-} ]]; then run_adapter "$1" sync
-    else for dir in "$MONO_PACKAGES"/*/; do [[ -d $dir ]] && adapter_for "$(basename "$dir")" >/dev/null 2>&1 && run_adapter "$(basename "$dir")" sync; done; fi ;;
+    else for dir in "$MONO_PACKAGES"/*/; do [[ -d $dir && $(basename "$dir") != monomono ]] && adapter_for "$(basename "$dir")" >/dev/null 2>&1 && run_adapter "$(basename "$dir")" sync; done; fi ;;
   ensure) cmd_ensure ;;
   *) usage ;;
 esac

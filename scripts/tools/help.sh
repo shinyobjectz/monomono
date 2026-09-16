@@ -46,7 +46,7 @@ Areas, public repos, hosts
 The package
 
   just mono status
-  just mono update [vX.Y.Z]      # bump .mono, run migrations, sync
+  just mono update [vX.Y.Z]      # bump packages/monomono, run migrations, sync
 TXT
 }
 

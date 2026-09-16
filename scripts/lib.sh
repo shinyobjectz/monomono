@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Shared helpers for monomono scripts. Source only.
-# MONO_HOME is the package checkout (.mono in a consumer). MONO_ROOT is the repo it serves.
+# MONO_HOME is the package checkout (packages/monomono in a consumer). MONO_ROOT is the repo it serves.
 
 set -euo pipefail
 
@@ -20,8 +20,8 @@ mono_find_root() {
 }
 
 if [[ -z ${MONO_ROOT:-} ]]; then
-  if [[ $(basename "$MONO_HOME") == .mono && -f $MONO_HOME/../mono.toml ]]; then
-    MONO_ROOT=$(cd "$MONO_HOME/.." && pwd)
+  if [[ $(basename "$MONO_HOME") == monomono && -f $MONO_HOME/../../mono.toml ]]; then
+    MONO_ROOT=$(cd "$MONO_HOME/../.." && pwd)
   elif MONO_ROOT=$(mono_find_root); then
     :
   else

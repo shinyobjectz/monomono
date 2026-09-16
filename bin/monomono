@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Bootstrap. Attaches monomono to a repo as .mono and scaffolds the skeleton.
+# Bootstrap. Attaches monomono to a repo as packages/monomono and scaffolds the skeleton.
 #
 #   curl -fsSL https://raw.githubusercontent.com/shinyobjectz/monomono/main/bin/monomono | bash -s -- init
 #   monomono init [dir] [--ref v0.1.0] [--repo <url>] [--vendor] [--name <repo-name>]
-#   monomono version
+#   monomono version                 # bootstrap version
+#   monomono upgrade                 # update the bootstrap checkout and buck2
+#   monomono doctor                  # host tools present?
 #
 # After init, everything else is `just`. This file has no dependency on the rest of the package
 # so it can run before the package is present.
@@ -47,34 +49,43 @@ cmd_init() {
     echo "initialized git repo at $TARGET"
   fi
 
-  if [[ -f $TARGET/.mono/VERSION ]]; then
-    echo ".mono already present ($(cat "$TARGET/.mono/VERSION")); running scaffold only"
+  if [[ -f $TARGET/packages/monomono/VERSION ]]; then
+    echo "packages/monomono already present ($(cat "$TARGET/packages/monomono/VERSION")); running scaffold only"
   else
     [[ -n $REF ]] || REF=$(latest_tag "$REPO")
     [[ -n $REF ]] || REF="main"
+    mkdir -p "$TARGET/packages"
     case "$MODE" in
       submodule)
-        git -C "$TARGET" -c protocol.file.allow=always submodule add --name monomono "$REPO" .mono
-        git -C "$TARGET/.mono" fetch -q --tags origin
-        git -C "$TARGET/.mono" checkout -q "$REF"
+        git -C "$TARGET" -c protocol.file.allow=always submodule add --name monomono "$REPO" packages/monomono
+        git -C "$TARGET/packages/monomono" fetch -q --tags origin
+        git -C "$TARGET/packages/monomono" checkout -q "$REF"
         ;;
       vendor)
-        git -c protocol.file.allow=always clone -q --depth 1 --branch "$REF" "$REPO" "$TARGET/.mono"
-        rm -rf "$TARGET/.mono/.git"
+        git -c protocol.file.allow=always clone -q --depth 1 --branch "$REF" "$REPO" "$TARGET/packages/monomono"
+        rm -rf "$TARGET/packages/monomono/.git"
         ;;
     esac
-    echo "attached monomono $REF as .mono ($MODE)"
+    echo "attached monomono $REF as packages/monomono ($MODE)"
   fi
 
-  MONO_HOME="$TARGET/.mono" MONO_ROOT="$TARGET" \
-    "$TARGET/.mono/scripts/tools/mono.sh" init --mode "$MODE" --repo "$REPO" ${NAME:+--name "$NAME"}
+  MONO_HOME="$TARGET/packages/monomono" MONO_ROOT="$TARGET" \
+    "$TARGET/packages/monomono/scripts/tools/mono.sh" init --mode "$MODE" --repo "$REPO" ${NAME:+--name "$NAME"}
 }
 
 case "${1:-}" in
   init) shift; cmd_init "$@" ;;
   version)
-    here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    here="$(cd "$(dirname "$(readlink "${BASH_SOURCE[0]}" || echo "${BASH_SOURCE[0]}")")/.." && pwd)"
     [[ -f $here/VERSION ]] && cat "$here/VERSION" || echo "remote"
+    ;;
+  upgrade)
+    curl -fsSL "${MONO_REPO_URL:-https://github.com/shinyobjectz/monomono}/raw/main/install.sh" | bash
+    ;;
+  doctor)
+    for t in git just buck2 sqlite3; do
+      if command -v "$t" >/dev/null 2>&1; then echo "ok    $t $($t --version 2>/dev/null | head -n 1 | cut -c1-50)"; else echo "miss  $t"; fi
+    done
     ;;
   *) usage ;;
 esac

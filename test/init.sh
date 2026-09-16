@@ -61,7 +61,7 @@ step "check (definition of green)"
 just check
 
 step "update path (same ref, exercises migrate + sync)"
-git -C .mono checkout -q "$(git -C "$here" rev-parse HEAD)"
+git -C packages/monomono checkout -q "$(git -C "$here" rev-parse HEAD)"
 just mono migrate
 just mono status
 

@@ -1,6 +1,6 @@
 # Scripts
 
-Backends for your own just recipes. The package's recipes live in `.mono`; these are yours.
+Backends for your own just recipes. The package's recipes live in `packages/monomono`; these are yours.
 
 ## Rules
 

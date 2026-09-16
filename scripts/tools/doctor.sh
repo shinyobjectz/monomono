@@ -27,21 +27,21 @@ fi
 if [[ -f $MONO_MANIFEST ]]; then
   pinned=$(toml_get monomono version || true)
   if [[ $pinned == "$MONO_VERSION" ]]; then
-    pass "mono.toml $pinned matches .mono"
+    pass "mono.toml $pinned matches packages/monomono"
   else
-    bad "mono.toml says ${pinned:-none}, .mono is $MONO_VERSION; just mono migrate"
+    bad "mono.toml says ${pinned:-none}, packages/monomono is $MONO_VERSION; just mono migrate"
   fi
 else
-  bad "mono.toml missing; run .mono/bin/monomono init"
+  bad "mono.toml missing; run packages/monomono/bin/monomono init"
 fi
 
 if [[ $MONO_HOME != "$MONO_ROOT" ]]; then
-  if [[ -f $MONO_ROOT/.gitmodules ]] && grep -q 'path = .mono' "$MONO_ROOT/.gitmodules"; then
-    pass ".mono is a submodule ($(git -C "$MONO_HOME" describe --tags --always 2>/dev/null))"
+  if [[ -f $MONO_ROOT/.gitmodules ]] && grep -q 'path = packages/monomono' "$MONO_ROOT/.gitmodules"; then
+    pass "packages/monomono is a submodule ($(git -C "$MONO_HOME" describe --tags --always 2>/dev/null))"
   elif [[ $(toml_get monomono mode) == vendor ]]; then
-    pass ".mono is vendored"
+    pass "packages/monomono is vendored"
   else
-    note ".mono is neither a submodule nor marked vendor in mono.toml"
+    note "packages/monomono is neither a submodule nor marked vendor in mono.toml"
   fi
 fi
 
@@ -61,7 +61,7 @@ fi
 if [[ -f $MONO_ROOT/justfile ]] && grep -qE "^import .*mono\.just" "$MONO_ROOT/justfile"; then
   pass "justfile imports mono.just"
 else
-  bad "justfile must import the package recipes (import '.mono/mono.just')"
+  bad "justfile must import the package recipes (import 'packages/monomono/mono.just')"
 fi
 
 if [[ -L $MONO_ROOT/AGENTS.md && $(readlink "$MONO_ROOT/AGENTS.md") == .agents/AGENTS.md ]]; then
@@ -89,7 +89,7 @@ fi
 
 # Ecosystem manifests belong under packages/<eco>. Anything else is a stray toolchain root.
 strays=$(cd "$MONO_ROOT" && find . \
-  \( -path ./.git -o -path ./.mono -o -path ./packages -o -path ./submodules -o -path ./buck-out -o -name node_modules -o -name target -o -name _build -o -name deps -o -name .venv \) -prune -o \
+  \( -path ./.git -o -path ./packages -o -path ./submodules -o -path ./buck-out -o -name node_modules -o -name target -o -name _build -o -name deps -o -name .venv \) -prune -o \
   -type f \( -name package.json -o -name Cargo.toml -o -name mix.exs -o -name pyproject.toml -o -name go.mod -o -name Gemfile -o -name Package.swift -o -name '*.lock' -o -name '*.lockb' \) -print \
   | grep -vE '^\./(buck-out|BUCK)' | sed 's#^\./##' | head -n 10 || true)
 if [[ -n $strays ]]; then
@@ -102,6 +102,7 @@ if [[ -d $MONO_PACKAGES ]]; then
   for eco in "$MONO_PACKAGES"/*/; do
     [[ -d $eco ]] || continue
     name=$(basename "$eco")
+    [[ $name != monomono ]] || continue
     if [[ -f $eco/.eco || -x $eco/adapter.sh ]]; then
       pass "packages/$name adapter $(cat "$eco/.eco" 2>/dev/null || echo local)"
     else

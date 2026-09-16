@@ -1,6 +1,6 @@
 # monomono
 
-A domain-agnostic monorepo contract, delivered as a versioned package. Consumers attach this repo at `.mono`, import `mono.just`, and get a `just` door, a buck2 build graph, an `AGENTS.md` contract, and a spec-first lifecycle, with no opinion about languages, vendors, or domains.
+A domain-agnostic monorepo contract, delivered as a versioned package. Consumers attach this repo at `packages/monomono`, import `mono.just`, and get a `just` door, a buck2 build graph, an `AGENTS.md` contract, and a spec-first lifecycle, with no opinion about languages, vendors, or domains.
 
 This file is the contract for working on monomono itself. `template/.agents/AGENTS.md` is the contract consumers get.
 
@@ -20,7 +20,8 @@ This file is the contract for working on monomono itself. `template/.agents/AGEN
 
 | Path | Owns |
 | --- | --- |
-| `bin/monomono` | Bootstrap. Attaches the package to a repo and scaffolds it. Standalone. |
+| `install.sh` | Machine install: just, buck2, and the bootstrap under `~/.local/bin`. Standalone. |
+| `bin/monomono` | Bootstrap. Attaches the package to a repo at `packages/monomono` and scaffolds it. Standalone. |
 | `mono.just` | Recipes every consumer imports. |
 | `scripts/` | Behavior behind those recipes. `lib.sh`, `build/`, `tools/`, `update/`. |
 | `rules/` | Starlark macros, the `@monomono//` cell. |

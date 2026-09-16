@@ -4,22 +4,33 @@ A monorepo contract you attach, not a template you fork.
 
 monomono gives a repo four things and takes no opinion about anything else: a `just` door, a buck2 build graph, an `AGENTS.md` contract, and a spec-first lifecycle. No language, vendor, cloud, framework, or domain is assumed. Toolchains are declared one at a time. Package ecosystems are adapters you pick. Domains are folders you name.
 
-It is delivered as a versioned package. Consumers pin a release at `.mono`, import its recipes, and move forward with `just mono update`.
+It is delivered as a versioned package. Consumers pin a release at `packages/monomono`, import its recipes, and move forward with `just mono update`.
 
-## Attach it
+## Install on a machine
+
+One curl. It puts `just`, `buck2`, and the `monomono` bootstrap under `~/.local/bin` and keeps a checkout at `~/.monomono`. Re-run it (or `monomono upgrade`) to update them. It never touches a repo.
 
 ```
-curl -fsSL https://raw.githubusercontent.com/shinyobjectz/monomono/main/bin/monomono | bash -s -- init
+curl -fsSL https://raw.githubusercontent.com/shinyobjectz/monomono/main/install.sh | bash
+```
+
+## Start a repo
+
+```
+mkdir myrepo && cd myrepo && git init
+monomono init
 just setup
 just check
 ```
 
-`init` adds this repo as a git submodule at `.mono` pinned to the latest tag, copies the skeleton once (never overwriting), links `AGENTS.md`, and writes `mono.toml`. `--vendor` copies instead of submoduling. `--ref vX.Y.Z` pins a version.
+No machine install? The bootstrap alone also runs from curl: `curl -fsSL https://raw.githubusercontent.com/shinyobjectz/monomono/main/bin/monomono | bash -s -- init`.
+
+`init` adds this repo as a git submodule at `packages/monomono` pinned to the latest tag, copies the skeleton once (never overwriting), links `AGENTS.md`, and writes `mono.toml`. `--vendor` copies instead of submoduling. `--ref vX.Y.Z` pins a version.
 
 ## What a consumer looks like
 
 ```
-justfile             import '.mono/mono.just' plus your own recipes
+justfile             import 'packages/monomono/mono.just' plus your own recipes
 mono.toml            pinned version, mode, modules
 AGENTS.md            -> .agents/AGENTS.md, the repo contract (yours)
 CLAUDE.md            Claude Code bootstrap
@@ -28,12 +39,13 @@ toolchains/BUCK      genrule, python_bootstrap, test. Nothing else until you add
 app/                 deliverables
 library/             shared code, one folder per domain
 packages/<eco>/      third-party manifests and lockfiles, behind an adapter
+packages/monomono/   this package, pinned to a release
 context/             sqlite junk drawer + projects/<p>/features/<f>/{bdd,test,BUCK}
 scripts/             your just backends: build/ tools/ update/
 git/ci/              CI source; .github/workflows is a generated copy
 submodules/          public repos as git submodules
 .agents/             standing rules and generated skills
-.mono/               this package
+packages/monomono/               this package
 ```
 
 Every folder carries an `AGENTS.md` with its rules. Agents read the root contract first and the nested one before editing a tree.
@@ -64,7 +76,7 @@ The consumer is the buck2 project root. `.buckconfig` declares the bundled prelu
 
 ## Versioning
 
-Releases are semver tags. `mono.toml` records the version a consumer is on. `just mono update [ref]` moves `.mono` to the tag, runs every `migrations/<version>.sh` between the old and new version in order, adds template files that did not exist before, resyncs generated files, and stages the result. Consumer-owned files (`AGENTS.md`, `justfile`, `BUCK`, folder rules) are never overwritten; a change that must reach them ships as a migration.
+Releases are semver tags. `mono.toml` records the version a consumer is on. `just mono update [ref]` moves `packages/monomono` to the tag, runs every `migrations/<version>.sh` between the old and new version in order, adds template files that did not exist before, resyncs generated files, and stages the result. Consumer-owned files (`AGENTS.md`, `justfile`, `BUCK`, folder rules) are never overwritten; a change that must reach them ships as a migration.
 
 ## Develop
 

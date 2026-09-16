@@ -2,7 +2,7 @@
   root = .
   prelude = prelude
   toolchains = toolchains
-  monomono = .mono
+  monomono = packages/monomono
   none = none
 
 [cell_aliases]
