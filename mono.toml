@@ -1,7 +1,7 @@
 # monomono manifest. This repo consumes itself; path is the checkout.
 
 [monomono]
-version = "0.1.0"
+version = "0.1.1"
 mode = "self"
 repo = "https://github.com/content-jet/monomono"
 
