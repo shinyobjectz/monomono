@@ -183,7 +183,7 @@ cmd_test() {
   if [[ $lang == lua ]]; then
     cat >"$dest" <<LUA
 -- Red on purpose. Locks: $(rel "$dir")/bdd
--- Runs under toolchains//:lua (just toolchain add lua). Put shared modules on LUA_PATH via deps in ../BUCK.
+-- Runs under toolchains//:lua (just toolchain add lua, lua-config or lua-host). Put shared modules on LUA_PATH via deps in ../BUCK.
 error("red: ${project}/${slug} / ${name}")
 LUA
     echo "created $(rel "$dest")  stage=implement"

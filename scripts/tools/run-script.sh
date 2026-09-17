@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Run a consumer script from scripts/<bucket>/<name>.{sh,lua}. Bash runs as before; Lua runs under toolchains//:lua.
+# Run a consumer script from scripts/<bucket>/<name>.{sh,lua}. Bash runs as before; Lua runs the way toolchains//:lua
+# would run it: the hermetic build, [lua] bin, or under lua-host the host command (lib.sh lua_run).
 #   run-script.sh <bucket> <name> [args...]
 
 source "$(cd "$(dirname "$0")/.." && pwd)/lib.sh"

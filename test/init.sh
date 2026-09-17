@@ -5,6 +5,9 @@
 # coverage/profile, script backend + hooks, other interpreters, host and config toolchains, provider refusal).
 #
 # MONO_SELFTEST_SKIP=a,b  skips sections by name (rust, wasm, luals, cmod, interpreters, stylua, luacheck).
+#
+# Under `set -e` a command inverted with `!` never exits the script, so a negative assertion is written
+# `refute cmd...` (fails the script when cmd succeeds), never `! cmd`.
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 work=$(mktemp -d)
@@ -17,6 +20,30 @@ have() { command -v "$1" >/dev/null 2>&1; }
 quiet() { grep -vE '^\[20[0-9-]+T' || true; }
 # expect PATTERN cmd...: run cmd, capture everything, grep the capture (no SIGPIPE from grep -q)
 expect() { local p=$1; shift; "$@" >"$work/out" 2>&1 || true; grep -qE -- "$p" "$work/out"; }
+# refute cmd...: the command must fail; its stdin is the caller's (refute grep -q x <<<"$out" works)
+refute() { if "$@" >/dev/null 2>&1; then echo "expected to fail: $*" >&2; exit 1; fi; }
+# overlay DIR: the consumers are scaffolded by cloning this checkout at HEAD; copy the working tree over the
+# package (and pin mono.toml to its VERSION) so what is under test is the checkout as it is, not its last
+# commit (identical in CI, where the tree is clean)
+overlay() {
+  rsync -a --delete --exclude .git --exclude buck-out "$here/" "$1/"
+  local manifest="$1/../../mono.toml"
+  [[ -f $manifest ]] && sed -i.bak "s/^version = \".*\"/version = \"$(tr -d '[:space:]' <"$here/VERSION")\"/" "$manifest" && rm -f "$manifest.bak"
+  return 0
+}
+# toolpath DIR PATTERN...: a directory of symlinks to every tool on PATH except those matching a pattern
+toolpath() {
+  local dest=$1; shift; mkdir -p "$dest"
+  local d f n pat skipit
+  for d in $(tr ':' ' ' <<<"$PATH"); do
+    for f in "$d"/*; do
+      n=$(basename "$f"); skipit=0
+      for pat in "$@"; do [[ $n == $pat ]] && skipit=1; done
+      [[ $skipit -eq 1 || ! -x $f || -e "$dest/$n" ]] || ln -s "$f" "$dest/$n"
+    done
+  done 2>/dev/null
+  return 0
+}
 ref=$(git -C "$here" rev-parse HEAD)
 
 step "init consumer at $work/demo from $here"
@@ -24,6 +51,7 @@ mkdir -p "$work/demo"
 git -C "$work/demo" init -q
 git -C "$work/demo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 MONO_REPO_URL="$here" "$here/bin/monomono" init "$work/demo" --ref "$ref" --name demo
+overlay "$work/demo/packages/monomono"
 cd "$work/demo"
 
 step "no python anywhere in the package"
@@ -39,11 +67,23 @@ printf '\n# a consumer recipe shadows the package one of the same name\ndoctor:\
 [[ "$(just doctor)" == "my doctor" ]]
 sed -i.bak '/^# a consumer recipe shadows/,$d' justfile && rm justfile.bak
 grep -qx '/.luarc.json' .gitignore && grep -qx '/.buckconfig.local' .gitignore
-mkdir -p library && printf '{}\n' > library/.luarc.json && ! git check-ignore -q library/.luarc.json && rm library/.luarc.json
-echo "allow-duplicate-recipes: your recipe wins; ignores are anchored, a committed library/.luarc.json survives"
+mkdir -p library && printf '{}\n' > library/.luarc.json && printf '{}\n' > .luarc.json
+refute git check-ignore -q library/.luarc.json
+git check-ignore -q .luarc.json
+rm library/.luarc.json .luarc.json
+echo "allow-duplicate-recipes: your recipe wins; ignores are anchored, a committed library/.luarc.json survives (the root one is ignored)"
 
 step "doctor"
 just doctor
+toolpath "$work/nojust" 'just'
+out=$(PATH="$work/nojust" packages/monomono/scripts/tools/doctor.sh 2>&1) || { echo "$out"; echo "doctor must not fail without just on PATH" >&2; exit 1; }
+grep -q 'warn  just not on PATH' <<<"$out"
+mkdir -p notes targets-only && printf 'a note\n' > notes/README.md && printf '# a folder that holds targets\n' > targets-only/BUCK
+out=$(just doctor 2>&1)
+refute grep -q 'notes/' <<<"$out"
+grep -q 'targets-only/ holds targets but has no AGENTS.md' <<<"$out"
+rm -r notes targets-only
+echo "doctor warns (not fails) without just; only a folder that holds targets is asked for an AGENTS.md"
 
 step "buck2 targets + build"
 just targets
@@ -135,17 +175,21 @@ lua_test(name = "test", src = "test_compare.lua", deps = [":hourly-check"])
 lua_feature_test(name = "own-runner", features = ["flow.feature"], runner_cmd = ["bash", "library/hourly-check/runner.sh"], deps = [":hourly-check"])
 BUCK
 printf 'return { same = function(a, b) return a == b end }\n' > library/hourly-check/compare.lua
-printf 'assert(require("hourly-check.compare").same(1, 1))\nassert(package.loaded["compare"] == nil)\nprint("prefixed module ok")\n' > library/hourly-check/test_compare.lua
+printf 'assert(require("hourly-check.compare").same(1, 1))\nassert(not pcall(require, "compare"), "the bare name must not be loadable")\nprint("prefixed module ok")\n' > library/hourly-check/test_compare.lua
 printf 'Feature: flow\n  Scenario: compares\n    Then it compares\n' > library/hourly-check/flow.feature
 cat > library/hourly-check/runner.sh <<'SH'
 #!/usr/bin/env bash
-# a consumer's own runner: gets only the feature files; LUA_PATH carries the deps; the exit code is the verdict
+# a consumer's own runner: gets only the feature files, from the project root; LUA_PATH carries the deps; the exit code is the verdict
 [[ $1 == *.feature ]] || { echo "expected a feature file first, got: $*" >&2; exit 1; }
-[[ $LUA_PATH == *hourly-check* ]] || { echo "LUA_PATH lacks the deps" >&2; exit 1; }
+[[ -f $1 && -f mono.toml ]] || { echo "not run from the project root: $PWD" >&2; exit 1; }
+[[ ${LUA_PATH-} == *hourly-check* ]] || { echo "LUA_PATH lacks the deps" >&2; exit 1; }
+[[ ${MONO_LUA_ROOTS-} == *hourly-check* ]] || { echo "MONO_LUA_ROOTS lacks the deps" >&2; exit 1; }
 echo "own runner ran $# feature(s)"
 SH
 just test //library/hourly-check:test //library/hourly-check:own-runner
-echo "prefix = 'hourly-check' makes compare.lua require-able as hourly-check.compare; own runner needs no steps"
+expect "own runner ran 1 feature" just run //library/hourly-check:own-runner
+expect "own runner ran 1 feature" just lua observe //library/hourly-check:own-runner
+echo "prefix = 'hourly-check' makes compare.lua require-able as hourly-check.compare; own runner needs no steps and sees the same environment under buck2 test and buck2 run"
 
 step "lua: compile check is part of the build"
 printf 'local x = = 1\n' > library/greet/util/broken.lua
@@ -169,7 +213,8 @@ lua_library(name = "fnmod", srcs = ["fnmod.lua"], visibility = ["PUBLIC"])
 BUCK
 printf -- '--- A module that is a function.\n---@param n number\n---@return number\nreturn function(n)\n  return n * 2\nend\n' > library/fnmod/fnmod.lua
 just lua meta //library/fnmod:fnmod >/dev/null
-grep -q '^return function(n) end' .lua-meta/fnmod.lua && grep -q '@param n number' .lua-meta/fnmod.lua && ! grep -q 'local M' .lua-meta/fnmod.lua
+grep -q '^return function(n) end' .lua-meta/fnmod.lua && grep -q '@param n number' .lua-meta/fnmod.lua
+refute grep -q 'local M' .lua-meta/fnmod.lua
 echo "return function(...) modules stub as an annotated function, not a table"
 
 step "lua: typecheck (lua-language-server)"
@@ -184,14 +229,23 @@ BUCK
     if just test //library/greet:types >/dev/null 2>&1; then echo "expected the typecheck to fail" >&2; exit 1; fi
     rm library/greet/bad.lua
     echo "typecheck passes clean code and fails g.hello(1) against the stub"
-    cat > library/greet/.luarc.json <<'JSON'
+    # the file is not named .luarc.json: LuaLS reads a .luarc.json it finds under the checked path on its own,
+    # so only a name it does not discover proves the `luarc` attribute is what was consumed
+    cat > library/greet/luarc.json <<'JSON'
 { "runtime.version": "Lua 5.4", "workspace.library": ["meta"], "workspace.ignoreDir": ["meta"], "workspace.checkThirdParty": false, "diagnostics.globals": ["arg"] }
 JSON
+    # a type that exists only in the hand-written meta dir: green proves the luarc's relative library path was resolved against `path`
+    printf -- '---@meta\n---@class greet.only_in_meta\n---@field n number\n' > library/greet/meta/types.lua
+    printf -- '---@param x greet.only_in_meta\n---@return number\nlocal function f(x) return x.n end\nreturn f\n' > library/greet/typed.lua
+    sed 's/"workspace.library": \["meta"\]/"workspace.library": []/' library/greet/luarc.json > library/greet/luarc-nolib.json
     cat >> library/greet/BUCK <<'BUCK'
-lua_typecheck(name = "types-own", luarc = ".luarc.json", path = "library/greet", srcs = glob(["**/*.lua"]))
+lua_typecheck(name = "types-own", luarc = "luarc.json", path = "library/greet", srcs = glob(["**/*.lua"]))
+lua_typecheck(name = "types-nolib", luarc = "luarc-nolib.json", path = "library/greet", srcs = glob(["**/*.lua"]))
 BUCK
     just test //library/greet:types-own
-    echo "lua_typecheck(luarc = ...) uses the library's own .luarc.json verbatim"
+    if just test //library/greet:types-nolib >/dev/null 2>&1; then echo "expected the typecheck to fail without the luarc's library path" >&2; exit 1; fi
+    sed -i.bak '/types-nolib/d' library/greet/BUCK && rm library/greet/BUCK.bak library/greet/luarc-nolib.json   # red on purpose; not part of just check
+    echo "lua_typecheck(luarc = ...) uses the library's own .luarc.json verbatim: its workspace.library resolves against path, and without it the same code is red"
   else
     echo "   (lua-language-server not on PATH; typecheck not exercised)"
   fi
@@ -411,7 +465,8 @@ grep -q 'monomono.scenario' <<<"$out"
 grep -q 'monomono.step' <<<"$out"
 test -f trace.json
 grep -q '"resourceSpans"' trace.json
-grep -q '"monomono.outcome"' trace.json && ! grep -q 'malleable' trace.json
+grep -q '"monomono.outcome"' trace.json
+refute grep -q 'malleable' trace.json
 cat > library/greet/profile.lua <<'LUA'
 -- a consumer's telemetry profile: its own collector's names (here, an agent harness's) replace monomono's
 return {
@@ -420,20 +475,33 @@ return {
     ["malleable.outcome"] = { "passed", "failed", "undefined", "broken", "skipped" },
     ["malleable.undefined"] = "number",
     ["malleable.unclosed"] = "boolean",
+    ["malleable.keyword"] = { "given", "when", "then" },
+    ["malleable.scenarios"] = "number",
+    ["malleable.steps"] = "number",
+    ["malleable.passed"] = "number",
+    ["malleable.failed"] = "number",
   },
   names = {
+    feature = "malleable.feature",
     scenario = "malleable.scenario",
+    step = "malleable.step",
     outcome = "malleable.outcome",
     undefined = "malleable.undefined",
     unclosed = "malleable.unclosed",
+    keyword = "malleable.keyword",
+    scenarios = "malleable.scenarios",
+    steps = "malleable.steps",
+    passed = "malleable.passed",
+    failed = "malleable.failed",
   },
 }
 LUA
 sed -i.bak 's/srcs = \["greet.lua", "util\/init.lua"\]/srcs = ["greet.lua", "util\/init.lua", "profile.lua"]/' library/greet/BUCK && rm library/greet/BUCK.bak
 MONO_TELEMETRY_PROFILE=profile MONO_TRACE_OUT="$work/profiled.json" buck2 run //context/projects/demo-app/features/hello:hello-gherkin >/dev/null 2>&1
-grep -q '"malleable.scenario ' "$work/profiled.json" && grep -q '"malleable.outcome"' "$work/profiled.json" && ! grep -q 'monomono.scenario' "$work/profiled.json"
+grep -q '"malleable.scenario ' "$work/profiled.json" && grep -q '"malleable.outcome"' "$work/profiled.json" && grep -q '"malleable.keyword"' "$work/profiled.json"
+refute grep -q 'monomono\.' "$work/profiled.json"
 just lua fmt //library/greet:fmt >/dev/null
-echo "default names are monomono.*; a consumer profile renames the join span and outcome for its own collector"
+echo "default names are monomono.*; a consumer profile that renames every name leaves no monomono.* key in the trace"
 grep -q '"gen_ai' trace.json || true
 out=$(just lua observe //context/projects/demo-app/features/hello:hello-gherkin 2>&1)
 grep -q 'Scenario: plain greeting' <<<"$out"
@@ -500,16 +568,27 @@ just agents check
 step "check (definition of green)"
 just check
 
-step "update path (same ref, exercises migrate + sync)"
+step "update path: a 0.4.0-shaped consumer runs migration 0.4.1 (migrate + sync)"
 git -C packages/monomono checkout -q "$ref"
-just mono migrate
+sed -i.bak -e 's|^/\.luarc\.json$|.luarc.json|' -e 's|^/\.lua-meta/$|.lua-meta/|' -e 's|^/coverage\.txt$|coverage.txt|' -e 's|^/trace\.json$|trace.json|' -e 's|^/\.buckconfig\.local$|.buckconfig.local|' .gitignore && rm .gitignore.bak
+sed -i.bak '/^set allow-duplicate-recipes/d' justfile && rm justfile.bak
+sed -i.bak 's/^version = ".*"/version = "0.4.0"/' mono.toml && rm mono.toml.bak
+refute grep -qx '/.luarc.json' .gitignore
+refute grep -q '^set allow-duplicate-recipes' justfile
+out=$(just mono migrate 2>&1); echo "$out"
+grep -q '^migrate 0.4.1$' <<<"$out"
+grep -q '^migrations run: 1 (0.4.0 -> ' <<<"$out"
+grep -q "^version = \"$(cat packages/monomono/VERSION)\"" mono.toml
 just mono status
 printf '\n# a consumer recipe shadows the package one of the same name\ndoctor:\n    @echo "my doctor"\n' >> justfile
 [[ "$(just doctor)" == "my doctor" ]]
 sed -i.bak '/^# a consumer recipe shadows/,$d' justfile && rm justfile.bak
 grep -qx '/.luarc.json' .gitignore && grep -qx '/.buckconfig.local' .gitignore
-mkdir -p library && printf '{}\n' > library/.luarc.json && ! git check-ignore -q library/.luarc.json && rm library/.luarc.json
-echo "allow-duplicate-recipes: your recipe wins; ignores are anchored, a committed library/.luarc.json survives"
+mkdir -p library && printf '{}\n' > library/.luarc.json && printf '{}\n' > .luarc.json
+refute git check-ignore -q library/.luarc.json
+git check-ignore -q .luarc.json
+rm library/.luarc.json .luarc.json
+echo "allow-duplicate-recipes: your recipe wins; ignores are anchored, a committed library/.luarc.json survives (the root one is ignored)"
 
 step "provider mode: an app that ships the package refuses just mono update"
 cp mono.toml "$work/mono.toml.bak"
@@ -519,6 +598,12 @@ expect "provided by someapp" just mono update
 expect "by someapp" just doctor
 cp "$work/mono.toml.bak" mono.toml
 echo "provider refusal + doctor line"
+toolpath "$work/nogit" 'git' 'git-*'
+sed -i.bak 's/^mode = "submodule"/mode = "vendor"/' mono.toml && rm mono.toml.bak
+if PATH="$work/nogit" MONO_REPO_URL=https://127.0.0.1:9/none just mono update >"$work/out" 2>&1; then echo "expected update to refuse under mode = vendor" >&2; exit 1; fi
+grep -q 'monomono is vendored' "$work/out"
+cp "$work/mono.toml.bak" mono.toml
+echo "mode = vendor alone refuses just mono update, with no git on PATH (it never fetches)"
 
 # --- a second consumer, in a path with a space, without the hermetic interpreter --------
 
@@ -529,6 +614,7 @@ mkdir -p "$work/host demo"
 git -C "$work/host demo" init -q
 git -C "$work/host demo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 MONO_REPO_URL="$here" "$here/bin/monomono" init "$work/host demo" --ref "$ref" --name hostdemo
+overlay "$work/host demo/packages/monomono"
 cd "$work/host demo"
 cat > app-host.sh <<SH
 #!/usr/bin/env bash
@@ -542,16 +628,33 @@ just toolchain add lua-host
 printf '[lua]\n  host = %s/app-host.sh\n  bin = %s\n' "$work/host demo" "$lua_bin" > .buckconfig.local   # both set: host wins for tests, bin serves bundle/meta
 mkdir -p library/x
 cat > library/x/BUCK <<'BUCK'
-load("@monomono//rules/lua:defs.bzl", "lua_library", "lua_test")
+load("@monomono//rules/lua:defs.bzl", "lua_library", "lua_test", "lua_bundle", "lua_meta", "lua_feature_test")
 lua_library(name = "x", srcs = ["x.lua"])
 lua_test(name = "test", src = "test_x.lua", deps = [":x"])
+lua_bundle(name = "bundle", main = "test_x.lua", deps = [":x"], dialect = "portable")
+lua_meta(name = "meta", deps = [":x"])
+lua_feature_test(name = "gherkin", features = ["x.feature"], steps = "steps.lua", deps = [":x"])
 BUCK
 printf 'return { two = function() return 2 end }\n' > library/x/x.lua
 printf 'assert(require("x").two() == 2)\nprint("x ok")\n' > library/x/test_x.lua
+printf 'Feature: x\n  Scenario: two\n    Given two is two\n' > library/x/x.feature
+printf 'local steps = require("mono.steps")\nsteps.given("two is two", function(ctx) assert(require("x").two() == 2) end)\n' > library/x/steps.lua
 just test //library/x:test
 expect "ran .* inside the app runtime" just run //library/x:test
 expect "ok=" just doctor
 echo "tests run through the host command; doctor does not demand make/cc"
+just build //library/x:bundle //library/x:meta
+grep -q '"=x"' "$(buck2 build //library/x:bundle --show-simple-output 2>/dev/null | tail -n 1)"
+test -f "$(buck2 build //library/x:meta --show-simple-output 2>/dev/null | tail -n 1)/x.lua"
+just test //library/x:gherkin
+expect "ran .*features.lua inside the app runtime" just run //library/x:gherkin
+expect "# 1 passed, 0 failed, 0 undefined" just run //library/x:gherkin
+echo "with both host and bin set: bundle and meta build through bin, the bundled feature runner runs through the host"
+cp toolchains/BUCK "$work/tc.bak"
+sed -i.bak '/^# monomono:toolchain lua-host$/d' toolchains/BUCK && rm toolchains/BUCK.bak
+expect 'without a "# monomono:toolchain' just doctor
+cp "$work/tc.bak" toolchains/BUCK
+echo "a toolchains/BUCK that declares toolchains//:lua without its marker line gets a doctor warning"
 mkdir -p scripts/hooks && printf 'print("lua hook ran")\n' > scripts/hooks/pre-build.lua
 expect "ran .* inside the app runtime" just build
 rm scripts/hooks/pre-build.lua
@@ -569,31 +672,30 @@ echo "under lua-config the .lua backends run through [lua] bin"
 
 # --- a third consumer: vendored (the package is a sibling cell, no submodule), no context module, no python on PATH
 
-step "vendored sibling cell, --no-context, and a PATH without python"
-mkdir -p "$work/vend" "$work/nopy"
-for d in $(tr ':' ' ' <<<"$PATH"); do
-  for f in "$d"/*; do
-    n=$(basename "$f"); case "$n" in python*|pip*) continue ;; esac
-    [[ -x $f && ! -e "$work/nopy/$n" ]] && ln -s "$f" "$work/nopy/$n"
-  done
-done 2>/dev/null
-! command -v python3 >/dev/null 2>&1 || [[ ! -e "$work/nopy/python3" ]]
-git -C "$work/vend" init -q
-git -C "$work/vend" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
-MONO_REPO_URL="$here" "$here/bin/monomono" init "$work/vend" --ref "$ref" --name vend --vendor --no-context --provider selftest
+step "vendored sibling cell in a folder that is not a git repository, --no-context, and a PATH without python or git"
+# the package is copied in by the app that ships it (no bin/monomono, no clone); nothing here may need git
+mkdir -p "$work/vend/packages"
+toolpath "$work/nopy" 'python*' 'pip*' 'git' 'git-*'
+[[ ! -e $work/nopy/python3 && ! -e $work/nopy/python && ! -e $work/nopy/git ]]
+mkdir -p "$work/vend/packages/monomono" && overlay "$work/vend/packages/monomono"
 cd "$work/vend"
+test ! -d .git
+MONO_HOME="$PWD/packages/monomono" MONO_ROOT="$PWD" PATH="$work/nopy" bash packages/monomono/scripts/tools/mono.sh init --mode vendor --provider selftest --no-context --name vend
 test ! -d packages/monomono/.git
 grep -q 'context = "false"' mono.toml
-just toolchain add lua >/dev/null
+grep -q 'mode = "vendor"' mono.toml
+PATH="$work/nopy" just toolchain add lua >/dev/null
 mkdir -p library/v
 printf 'load("@monomono//rules/lua:defs.bzl", "lua_library", "lua_test")\nlua_library(name = "v", srcs = ["v.lua"])\nlua_test(name = "test", src = "t.lua", deps = [":v"])\n' > library/v/BUCK
 printf 'return { one = 1 }\n' > library/v/v.lua
 printf 'assert(require("v").one == 1)\n' > library/v/t.lua
 out=$(PATH="$work/nopy" just doctor 2>&1) || { echo "$out"; exit 1; }
-! grep -q 'sqlite3' <<<"$out"
+refute grep -q 'sqlite3' <<<"$out"
 grep -q 'vendored by selftest' <<<"$out"
+grep -q 'git not installed (optional' <<<"$out"
 PATH="$work/nopy" just check
-echo "vendored @monomono cell loads from packages/monomono with no .git; no sqlite3 asked for; just check green with no python on PATH"
+expect "provided by selftest" env PATH="$work/nopy" just mono update
+echo "vendored @monomono cell loads from packages/monomono in a non-git folder; no sqlite3 asked for; just check green with no python and no git on PATH"
 
 echo
 echo "selftest ok"

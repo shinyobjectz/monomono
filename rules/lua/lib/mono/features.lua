@@ -1,6 +1,6 @@
 -- features.lua STEPS.lua FEATURE.feature...   (the lua_feature_test entry point)
 -- Runs every scenario against the step definitions, prints TAP, and records one span tree:
---   <names.feature> <path> > <names.scenario> <name> > <names.step> <text>   (names from mono.telemetry, renamed by a profile)
+--   <names.feature> <path> > <names.scenario> <name> > <names.step> <text>   (every span and attribute name from mono.telemetry.names, renamed by a profile)
 -- MONO_TELEMETRY_PROFILE=<module> loads a consumer vocabulary before any span opens (see mono.telemetry).
 -- MONO_TRACE_OUT=<file> writes OTLP JSON. MONO_TRACE=1 prints the tree. MONO_OBSERVE=1 prints the trace read back as Gherkin.
 local telemetry = require("mono.telemetry")
@@ -22,11 +22,11 @@ local report = {}   -- machine-readable: one row per scenario (MONO_REPORT_OUT)
 
 for _, path in ipairs(arg) do
   local doc = gherkin.read(path)
-  local fspan = R.open_span(N.feature .. " " .. path, nil, { ["monomono.scenarios"] = #doc.scenarios })
+  local fspan = R.open_span(N.feature .. " " .. path, nil, { [N.scenarios] = #doc.scenarios })
   local fpassed, ffailed = 0, 0
   for _, sc in ipairs(doc.scenarios) do
     total = total + 1; idx = idx + 1
-    local span = R.open_span(N.scenario .. " " .. sc.name, fspan, { ["monomono.steps"] = #sc.steps })
+    local span = R.open_span(N.scenario .. " " .. sc.name, fspan, { [N.steps] = #sc.steps })
     local ctx = { scenario = sc.name, feature = doc.feature }
     local outcome, why, at = "passed", nil, nil
     for _, st in ipairs(sc.steps) do
@@ -62,7 +62,7 @@ for _, path in ipairs(arg) do
       for line in tostring(why):gmatch("[^\n]+") do out[#out + 1] = "# " .. line end
     end
   end
-  R.close_span(fspan, { ["monomono.passed"] = fpassed, ["monomono.failed"] = ffailed, [N.undefined] = undefined }, ffailed == 0)
+  R.close_span(fspan, { [N.passed] = fpassed, [N.failed] = ffailed, [N.undefined] = undefined }, ffailed == 0)
 end
 R.close_all()
 

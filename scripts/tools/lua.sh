@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# The Lua dev loop over the graph. The interpreter is toolchains//:lua, so every verb is hermetic.
+# The Lua dev loop over the graph. Every verb runs under whatever declared toolchains//:lua: the hermetic build,
+# [lua] bin, or under lua-host the host command (lib.sh lua_run); cover and profile need an interpreter.
 
 source "$(cd "$(dirname "$0")/.." && pwd)/lib.sh"
 require_cmd buck2
@@ -16,7 +17,7 @@ usage:
   just lua fmt [lua_format target]               # stylua in place (default //...:fmt targets)
   just lua trace <feature test target>           # run Gherkin scenarios, print the span tree, write trace.json
   just lua observe <feature test target>         # run scenarios, read the trace back as Gherkin
-  just lua script <file.lua> [args...]           # run a repo script under the hermetic interpreter
+  just lua script <file.lua> [args...]           # run a repo script the way toolchains//:lua would
   just lua version
 USAGE
   exit 2

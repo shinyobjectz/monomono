@@ -8,7 +8,8 @@ usage() {
 usage:
   just mono status              # version pinned, version installed, mode, modules
   just mono version             # installed package version
-  just mono update [ref]        # move packages/monomono to <ref> (default: latest tag), migrate, sync
+  just mono update [ref]        # submodule mode: move packages/monomono to <ref> (default: latest tag), migrate, sync
+                                #   vendor mode refuses (never fetches): replace the copy yourself, then just mono migrate; just mono sync
   just mono migrate             # run migrations from mono.toml version to packages/monomono/VERSION
   just mono sync                # relink hosts, regenerate skills, copy ci, add new template files
   just mono diff                # template files the repo does not have yet
@@ -125,15 +126,8 @@ cmd_update() {
       git -C "$MONO_HOME" checkout -q "$ref"
       ;;
     vendor)
-      [[ -n $ref ]] || ref=$(git ls-remote --tags --refs "$repo" | awk -F/ '{print $NF}' | sort -V | tail -n 1)
-      [[ -n $ref ]] || die "no release tags found in $repo"
-      local tmp
-      tmp=$(mktemp -d)
-      git clone -q --depth 1 --branch "$ref" "$repo" "$tmp/mono"
-      rm -rf "$tmp/mono/.git"
-      rm -rf "$MONO_HOME"
-      mv "$tmp/mono" "$MONO_HOME"
-      rm -rf "$tmp"
+      # a vendored copy is replaced by whoever put it there; this never fetches (no git ls-remote, no clone)
+      die "monomono is vendored (mode = \"vendor\" in mono.toml); replace $(rel "$MONO_HOME") with the release you want, then run just mono migrate and just mono sync"
       ;;
     *) die "unknown mode in mono.toml: $mode" ;;
   esac

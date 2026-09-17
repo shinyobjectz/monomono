@@ -23,8 +23,9 @@ def mono_check(name, test, args = None, env = None, labels = None, **kwargs):
 def mono_feature_tests(name, tests, features = None, steps = None, deps = None, labels = None, runner = None, runner_cmd = None):
     """A feature's test targets plus a test_suite named `name`.
     .sh files run as shell checks; .lua files run under toolchains//:lua with `deps` on LUA_PATH;
-    when `steps` names a steps file, every .feature in `features` runs as Gherkin scenarios
-    and the run is traced as spans (MONO_TRACE_OUT=file for OTLP JSON; MONO_TELEMETRY_PROFILE names them)."""
+    when `steps` names a steps file (or `runner`/`runner_cmd` names your own runner), every .feature in
+    `features` runs as Gherkin scenarios; monomono's runner traces the run as spans (MONO_TRACE_OUT=file for
+    OTLP JSON; MONO_TELEMETRY_PROFILE names them)."""
     targets = []
     tags = (labels or []) + ["feature:" + name]
     for t in tests:
@@ -37,7 +38,7 @@ def mono_feature_tests(name, tests, features = None, steps = None, deps = None, 
             mono_check(name = tname, test = t, labels = tags)
         targets.append(":" + tname)
     step_files = steps if type(steps) == "list" else ([steps] if steps else [])
-    if step_files and features:
-        lua_feature_test(name = name + "-gherkin", features = features, steps = step_files[0], deps = deps or [], labels = tags, runner = runner, runner_cmd = runner_cmd or [])
+    if features and (step_files or runner or runner_cmd):
+        lua_feature_test(name = name + "-gherkin", features = features, steps = step_files[0] if step_files else None, deps = deps or [], labels = tags, runner = runner, runner_cmd = runner_cmd or [])
         targets.append(":" + name + "-gherkin")
     native.test_suite(name = name, tests = targets, visibility = ["PUBLIC"])

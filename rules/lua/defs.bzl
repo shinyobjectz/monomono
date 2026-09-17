@@ -396,10 +396,11 @@ def _lua_typecheck_impl(ctx):
     minfo = ctx.attrs.meta.get(LuaMetaInfo) if ctx.attrs.meta != None else None
     ignore = ",".join(['"{}"'.format(p[len(prefix):]) for p in minfo.provided if p.startswith(prefix)]) if minfo else ""
     if ctx.attrs.luarc != None:
-        # your own .luarc.json, used as it is: relative paths in it are yours to resolve (LuaLS reads them against the checked dir)
+        # your own .luarc.json, used as it is: LuaLS resolves a relative workspace.library against `path` (the checked dir), not the luarc's directory.
+        # --configpath must be absolute: LuaLS resolves a relative one against the checked dir too, and silently ignores a missing file.
         cmd = cmd_args(
-            "sh", "-c", 'out=$("$@" 2>&1); echo "$out"; echo "$out" | grep -q "no problems found"', "--",
-            tool.run, "--check", ctx.attrs.path, "--configpath", ctx.attrs.luarc, "--checklevel", ctx.attrs.level.capitalize(),
+            "sh", "-c", 'rc="$PWD/$1"; shift; out=$("$@" --configpath "$rc" 2>&1); echo "$out"; echo "$out" | grep -q "no problems found"', "--",
+            ctx.attrs.luarc, tool.run, "--check", ctx.attrs.path, "--checklevel", ctx.attrs.level.capitalize(),
             hidden = ([outdir] if outdir != None else []) + tool.inputs + ctx.attrs.srcs,
         )
         return [DefaultInfo(), RunInfo(args = cmd), _test_info(cmd, ctx)]
@@ -417,7 +418,7 @@ lua_typecheck = rule(
     impl = _lua_typecheck_impl,
     attrs = dict({
         "meta": attrs.option(attrs.dep(), default = None, doc = "a lua_meta target (or a lua_library[meta]): the dir holding stubs and a generated .luarc.json"),
-        "luarc": attrs.option(attrs.source(), default = None, doc = "your own .luarc.json; used verbatim instead of the generated one"),
+        "luarc": attrs.option(attrs.source(), default = None, doc = "your own .luarc.json, used verbatim instead of the generated one; LuaLS resolves a relative workspace.library in it against `path`, not against the luarc's directory, so check the directory the luarc sits in"),
         "path": attrs.string(doc = "project-relative dir LuaLS checks"),
         "srcs": attrs.list(attrs.source(), default = [], doc = "the files under path, so a change re-runs the check (glob them)"),
         "level": attrs.enum(["error", "warning", "information"], default = "warning"),
@@ -462,32 +463,46 @@ lua_format = rule(
 
 # --- gherkin ------------------------------------------------------------------
 
-def _lua_path_env(infos):
+def _runner_wrapper(ctx, head, infos, args):
+    """A bash wrapper around someone else's runner: cd to the project root, export the module path
+    (LUA_PATH, LUA_CPATH, MONO_LUA_ROOTS, then the target's env), exec <runner> [--steps <file>] <features...>.
+    One script serves `buck2 test` and `buck2 run`, so the runner sees the same environment under both
+    (an ExternalRunnerTestInfo env reaches only the test path; `just lua trace` and `observe` use `buck2 run`)."""
     roots, cpaths, _ = _merge(infos)
-    parts = []
+    path_parts = []
+    root_parts = []
     for r in roots:
-        parts.append(cmd_args(r, format = "{}/?.lua"))
-        parts.append(cmd_args(r, format = "{}/?/init.lua"))
-    parts.append(";")
-    return {
-        "LUA_PATH": cmd_args(parts, delimiter = ";"),
-        "LUA_CPATH": cmd_args([cmd_args(c, format = "{}/?.so") for c in cpaths] + [";"], delimiter = ";"),
-        "MONO_LUA_ROOTS": cmd_args(roots, delimiter = ";"),
-    }
+        path_parts.append(cmd_args(r, format = "$root/{}/?.lua"))
+        path_parts.append(cmd_args(r, format = "$root/{}/?/init.lua"))
+        root_parts.append(cmd_args(r, format = "$root/{}"))
+    path_parts.append(";")
+    cpath_parts = [cmd_args(c, format = "$root/{}/?.so") for c in cpaths] + [";"]
+    lines = [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        'here=$(cd "$(dirname "$0")" && pwd -P)',
+        "root=${here%%/buck-out/*}",
+        'cd "$root"',
+        cmd_args('export LUA_PATH="', cmd_args(path_parts, delimiter = ";"), '"', delimiter = ""),
+        cmd_args('export LUA_CPATH="', cmd_args(cpath_parts, delimiter = ";"), '"', delimiter = ""),
+        cmd_args('export MONO_LUA_ROOTS="', cmd_args(root_parts, delimiter = ";"), '"', delimiter = ""),
+    ]
+    for k in sorted(ctx.attrs.env.keys()):
+        lines.append(cmd_args("export " + k + "=", cmd_args(ctx.attrs.env[k], quote = "shell"), delimiter = ""))
+    lines.append(cmd_args("exec ", cmd_args(head, delimiter = " ", quote = "shell"), " ", cmd_args(args, delimiter = " ", quote = "shell"), ' "$@"', delimiter = ""))
+    script, hidden = ctx.actions.write(ctx.attrs.name + ".sh", lines, is_executable = True, allow_args = True)
+    return script, hidden + roots + cpaths + args
 
 def _lua_feature_test_impl(ctx):
     tc = _tc(ctx)
     infos = _infos(ctx.attrs.deps)
     if ctx.attrs.runner != None or ctx.attrs.runner_cmd:
-        # someone else's runner: <runner> --steps <file> <feature>..., from the project root, with the module path in the environment
+        # someone else's runner: <runner> [--steps <file>] <feature>..., from the project root, with the module path in the environment
         head = ctx.attrs.runner[RunInfo].args if ctx.attrs.runner != None else cmd_args(ctx.attrs.runner_cmd)
         # the verdict is the exit code; a "# N passed, M failed, K undefined" line and MONO_REPORT_OUT are conventions for people and apps, nothing here reads them
-        cmd = cmd_args(head, (["--steps", ctx.attrs.steps] if ctx.attrs.steps != None else []), ctx.attrs.features, hidden = [r for i in infos for r in i.roots])
-        env = dict(ctx.attrs.env)
-        env.update(_lua_path_env(infos))
-        return [DefaultInfo(), RunInfo(args = cmd), ExternalRunnerTestInfo(
-            type = "custom", command = [cmd] + ctx.attrs.args, env = env, labels = ctx.attrs.labels,
-            run_from_project_root = True, use_project_relative_paths = True)]
+        script, inputs = _runner_wrapper(ctx, head, infos, (["--steps", ctx.attrs.steps] if ctx.attrs.steps != None else []) + ctx.attrs.features)
+        cmd = cmd_args(script, hidden = inputs)
+        return _run_providers(script, inputs) + [_test_info(cmd, ctx)]
     stdlib = ctx.attrs._stdlib[DefaultInfo].default_outputs[0]
     if ctx.attrs.steps == None:
         fail("lua_feature_test: steps is required unless you pass runner or runner_cmd")

@@ -6,7 +6,10 @@
 --- it with `vocabulary(profile)`, so an app's collector sees its own names, not this package's.
 ---
 --- A profile is { adopted = {names...}, minted = {name = rule...}, names = {feature=, scenario=,
---- step=, outcome=, undefined=, unclosed=, run=, kind=}, events = function(event) -> name, attrs, ok }.
+--- step=, outcome=, undefined=, unclosed=, run=, kind=, keyword=, scenarios=, steps=, passed=, failed=},
+--- events = function(event) -> name, attrs, ok }. Every key the runner writes is in `names`, so a
+--- profile that renames them all leaves no monomono.* key in the trace; a partial `names` keeps
+--- the defaults for the rest. A renamed attribute must also be minted, or the recorder refuses it.
 --- The feature runner loads MONO_TELEMETRY_PROFILE (a module name) before any span opens; a steps
 --- file may call vocabulary() itself. This module opens no socket and requires nothing.
 local T = {}
@@ -35,10 +38,12 @@ T.MINTED = {
 }
 
 --- Span and attribute names the runner uses; a profile renames them (a scenario may be an app's join span).
+--- The runner writes no attribute key that is not listed here.
 T.names = {
   feature = "monomono.feature", scenario = "monomono.scenario", step = "monomono.step",
   outcome = "monomono.outcome", undefined = "monomono.undefined", unclosed = "monomono.unclosed",
   run = "monomono.run", kind = "monomono.kind", keyword = "monomono.keyword",
+  scenarios = "monomono.scenarios", steps = "monomono.steps", passed = "monomono.passed", failed = "monomono.failed",
 }
 
 T.events = nil   -- a profile's mapping from an app's flat run events to spans

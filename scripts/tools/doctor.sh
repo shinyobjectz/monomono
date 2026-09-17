@@ -17,12 +17,17 @@ need() {
   fi
 }
 
-need just
+# just is the door for people; every script here runs without it (an app may drive the scripts directly)
+if command -v just >/dev/null 2>&1; then pass "just $(just --version 2>/dev/null | head -n 1 | cut -c1-40)"; else note "just not on PATH (optional: the scripts run without it; people run recipes through it)"; fi
 need buck2 "just setup installs it"
 mode=$(toml_get monomono mode || true)
 if [[ $mode == submodule || -z $mode ]]; then need git; elif command -v git >/dev/null 2>&1; then pass "git $(git --version | cut -c1-40)"; else note "git not installed (optional: the package is ${mode})"; fi
 if [[ -f $MONO_TOOLCHAINS/BUCK ]] && grep -qE "^# monomono:toolchain (lua|lua-5\.[13]|luajit)$" "$MONO_TOOLCHAINS/BUCK"; then
   for t in make cc; do command -v $t >/dev/null 2>&1 && pass "$t (hermetic lua toolchain)" || bad "missing $t; the hermetic lua toolchain builds from source (or use lua-config / lua-host)"; done
+fi
+# the marker line is how the scripts read toolchains/BUCK (lib.sh lua_bin / lua_run); a hand-written file must carry it
+if [[ -f $MONO_TOOLCHAINS/BUCK ]] && grep -qE '^\s*name\s*=\s*"lua"' "$MONO_TOOLCHAINS/BUCK" && ! grep -qE '^# monomono:toolchain (lua|lua-5\.[13]|luajit|lua-system|lua-config|lua-host)$' "$MONO_TOOLCHAINS/BUCK"; then
+  note 'toolchains//:lua is declared without a "# monomono:toolchain <name>" line above it; hooks and scripts fall through to [lua] bin'
 fi
 
 if mono_module context; then
@@ -119,11 +124,13 @@ if [[ -d $MONO_PACKAGES ]]; then
   done
 fi
 
+# A folder that holds targets (a BUCK file somewhere beneath it) carries its rules in an AGENTS.md; folders of plain files are yours
 for area in "$MONO_ROOT"/*/; do
   name=$(basename "$area")
   case "$name" in buck-out|node_modules|submodules|toolchains) continue ;; esac
   [[ -d $area ]] || continue
-  [[ -f $area/AGENTS.md ]] || note "$name/ has no AGENTS.md"
+  [[ -f $area/AGENTS.md ]] && continue
+  [[ -n $(find "$area" -name BUCK -not -path '*/buck-out/*' -print -quit 2>/dev/null) ]] && note "$name/ holds targets but has no AGENTS.md"
 done
 
 if [[ -d $MONO_CI/github ]]; then

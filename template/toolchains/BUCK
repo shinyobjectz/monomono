@@ -1,5 +1,12 @@
 # Declared toolchains. Nothing is assumed: add one with `just toolchain add <name>`.
 # genrule + python_bootstrap let genrule run; test + remote_test_execution let *_test rules run. That is all.
+#
+# Contract: each declared toolchain sits under a `# monomono:toolchain <name>` line, <name> being the fragment
+# (just toolchain available). `just toolchain add` writes the line; a BUCK written by hand or by an app must
+# write it too. The scripts read this file through those lines, never the Starlark: `just toolchain list`,
+# doctor's make/cc check for a hermetic interpreter, and which interpreter runs .lua hooks, scripts and the
+# --steps writer (lua, lua-5.1, lua-5.3, luajit: the hermetic build; lua-system: PATH; lua-host: [lua] host,
+# which wins over bin; lua-config or no line: [lua] bin from .buckconfig.local).
 load("@prelude//tests:test_toolchain.bzl", "noop_test_toolchain")
 load("@prelude//toolchains:genrule.bzl", "system_genrule_toolchain")
 load("@prelude//toolchains:python.bzl", "system_python_bootstrap_toolchain")
